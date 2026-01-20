@@ -1,14 +1,13 @@
 import asyncio
 import json
 from playwright.async_api import async_playwright
-from playwright_stealth import stealth_async
+from playwright_stealth import Stealth
 
 
 async def get_fresh_cookies(target_url, proxy_config):
-    async with async_playwright() as p:
-        # Iniciamos navegador con TU PROXY
+    async with Stealth().use_async(async_playwright()) as p:
         browser = await p.chromium.launch(
-            headless=True,  # Cambia a False si quieres ver el proceso
+            headless=True,
             proxy={
                 "server": f"http://{proxy_config['server']}",
                 "username": proxy_config["user"],
@@ -17,18 +16,18 @@ async def get_fresh_cookies(target_url, proxy_config):
         )
 
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            user_agent=(
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
         )
+
         page = await context.new_page()
-        await stealth_async(page)
 
         print("Navegando a Goofish con la IP del proxy...")
         await page.goto(target_url, wait_until="networkidle")
 
-        # Esperamos un poco para que los scripts de seguridad generen el 'tfstk'
         await asyncio.sleep(5)
 
-        # Extraemos las cookies
         cookies_list = await context.cookies()
         cookies_dict = {c["name"]: c["value"] for c in cookies_list}
 
@@ -36,8 +35,11 @@ async def get_fresh_cookies(target_url, proxy_config):
         return cookies_dict
 
 
-# Configuración de tu Netnut
-proxy = {"server": "gw.netnut.net:5959", "user": "codify-dc-any", "pass": "58ADAB79s03h8TJ"}
+proxy = {
+    "server": "gw.netnut.net:5959",
+    "user": "codify-dc-any",
+    "pass": "58ADAB79s03h8TJ",
+}
 
 url = "https://www.goofish.com/item?id=995598771021"
 

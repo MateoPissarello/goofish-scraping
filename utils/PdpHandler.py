@@ -4,12 +4,10 @@ import time
 from urllib.parse import urlparse, parse_qs
 from hashlib import md5
 
-SCRAPED_ITEMS = set()
-
-
 class PdpHandler:
     API_URL = "https://h5api.m.goofish.com/h5/mtop.taobao.idle.pc.detail/1.0/"
     APP_KEY = "34839810"
+    MAX_RETRIES = 3
 
     def __init__(self, url, cookies: dict, proxies):
         self.url = url
@@ -37,20 +35,13 @@ class PdpHandler:
         raw = f"{token_val}&{timestamp}&{self.APP_KEY}&{data}"
         return md5(raw.encode("utf-8")).hexdigest()
 
-    def fetch_data(self) -> dict:
-        payload = {"itemId": self.item_id}
-        data_str = json.dumps(payload, separators=(",", ":"))
+    def _preflight_token(self, data_str: str) -> str:
         timestamp = str(int(time.time() * 1000))
-
-        # Obtenemos el token de la sesión
-        token = self.session.cookies.get("_m_h5_tk", "")
-        sign = self._generate_sign(token, timestamp, data_str)
-
         params = {
             "jsv": "2.7.2",
             "appKey": self.APP_KEY,
             "t": timestamp,
-            "sign": sign,
+            "sign": "",
             "v": "1.0",
             "type": "originaljson",
             "dataType": "json",
@@ -58,36 +49,86 @@ class PdpHandler:
             "data": data_str,
         }
 
-        # Cambiamos a GET para mayor compatibilidad con MTOP PC
-        response = self.session.get(
-            self.API_URL,
-            headers=self.headers,
-            params=params,
-            timeout=15,
-        )
+        try:
+            self.session.get(
+                self.API_URL,
+                headers=self.headers,
+                params=params,
+                timeout=15,
+            )
+        except requests.RequestException:
+            return ""
 
-        res_json = response.json()
+        return self.session.cookies.get("_m_h5_tk", "")
 
-        # --- DEBUG CRÍTICO ---
-        # Esto te dirá por qué recibes nulls
-        ret_message = res_json.get("ret", ["No ret"])[0]
-        print(f"RESPUESTA SERVIDOR: {ret_message}")
+    def fetch_data(self) -> dict:
+        payload = {"itemId": self.item_id}
+        data_str = json.dumps(payload, separators=(",", ":"))
+        last_error = None
 
-        if "SUCCESS" not in ret_message and "FAIL_SYS_TOKEN" in ret_message:
-            print("Actualizando token y reintentando...")
-            # La sesión ya tiene la cookie nueva de la respuesta anterior
-            return self.fetch_data()
+        for _ in range(self.MAX_RETRIES):
+            token = self.session.cookies.get("_m_h5_tk", "")
+            if not token:
+                token = self._preflight_token(data_str)
 
-        return res_json
+            timestamp = str(int(time.time() * 1000))
+            sign = self._generate_sign(token, timestamp, data_str)
+
+            params = {
+                "jsv": "2.7.2",
+                "appKey": self.APP_KEY,
+                "t": timestamp,
+                "sign": sign,
+                "v": "1.0",
+                "type": "originaljson",
+                "dataType": "json",
+                "api": "mtop.taobao.idle.pc.detail",
+                "data": data_str,
+            }
+
+            try:
+                response = self.session.get(
+                    self.API_URL,
+                    headers=self.headers,
+                    params=params,
+                    timeout=15,
+                )
+                res_json = response.json()
+            except (requests.RequestException, ValueError) as exc:
+                last_error = str(exc)
+                continue
+
+            ret_message = res_json.get("ret", ["No ret"])[0]
+            print(f"RESPUESTA SERVIDOR: {ret_message}")
+
+            if "SUCCESS" in ret_message:
+                return res_json
+
+            if "FAIL_SYS_TOKEN" in ret_message or "TOKEN_EMPTY" in ret_message:
+                last_error = ret_message
+                continue
+
+            if "FAIL_SYS_ILLEGAL_ACCESS" in ret_message or "FAIL_SYS_USER_VALIDATE" in ret_message:
+                return {"ret": [ret_message], "data": {}}
+
+            last_error = ret_message
+
+        return {"ret": [last_error or "FAIL_SYS_UNKNOWN"], "data": {}}
 
     def parse_product(self, raw_json: dict) -> dict:
+        ret_message = raw_json.get("ret", [""])[0]
+        if ret_message and "SUCCESS" not in ret_message:
+            return {"ERROR": f"MTOP error: {ret_message}"}
+
         data = raw_json.get("data", {})
         item = data.get("itemDO", {})
         track = data.get("trackParams", {})
 
         # Si item está vacío, es que el bloqueo fue total
         if not item:
-            return {"ERROR": "El servidor no devolvió datos del producto. Posible bloqueo por IP/Fingerprint."}
+            return {
+                "ERROR": "El servidor no devolvió datos del producto. Posible bloqueo por IP/Fingerprint.",
+            }
 
         images = [img.get("photoSearchUrl") for img in item.get("imageInfos", []) if img.get("photoSearchUrl")]
 
@@ -106,12 +147,10 @@ class PdpHandler:
 
 
 if __name__ == "__main__":
-    # ¡CUIDADO! Estas cookies duran muy poco
     cookies = {
         "_m_h5_tk": "e957e7ff4858ee6b86d77e544492687a_1768952645799",
         "_m_h5_tk_enc": "1",
         "cookie2": "1887efd6a7ab51064b86528b25a39ae8",
-        # El tfstk es el CULPABLE de los nulls si no coincide con tu IP
         "tfstk": "gDbrfraMJc3fxJwG_1YUuoBh8px82ePbCTbBtBfd9XvkreTeK6fHFB9CtvWFnO1SPw1HL9WXH315Og6bTtXONH1hRBbeyZsSRLwJ86X67Rw_5P1RwEL3CR6B-Que-B4BKotleZDuuRw_5PNHejGuC_T5hZW29KcoE4XnnsvvTvAlKLxmnCR9-pXhKn4D1BioqBvknSRpnpYH-9f0gBJDKeYhKsvA-6fruCtuMR8Er7UQ5HpGZKun7tdymU49320luQk6I_Ai-2b2a3Q2Xj6VLeSh6M8Hu74hwO9vxg5YLVJlf1BDinGIRs5feN8l78uWGh51fUQg3VvFqTBw_TSyVvdmJj_d4vmHq2O2CSPqJe_gxDEShEoKvn4vgdNWNDnpqId2CSPqvDK0MIJ_a45..",
     }
     proxies = {
