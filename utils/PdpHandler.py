@@ -1,0 +1,125 @@
+import requests
+import json
+import time
+from urllib.parse import urlparse, parse_qs
+from hashlib import md5
+
+SCRAPED_ITEMS = set()
+
+
+class PdpHandler:
+    API_URL = "https://h5api.m.goofish.com/h5/mtop.taobao.idle.pc.detail/1.0/"
+    APP_KEY = "34839810"
+
+    def __init__(self, url, cookies: dict, proxies):
+        self.url = url
+        self.item_id = self._extract_item_id(url)
+        self.proxies = proxies
+        # Usamos Session para mantener las cookies dinámicas
+        self.session = requests.Session()
+        self.session.proxies = proxies
+        self.session.cookies.update(cookies)
+        self.headers = {
+            "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Referer": f"https://www.goofish.com/item?id={self.item_id}",
+        }
+
+    def _extract_item_id(self, url) -> str:
+        parsed = urlparse(url)
+        qs = parse_qs(parsed.query)
+        if "id" not in qs:
+            raise ValueError("URL sin id")
+        return qs["id"][0]
+
+    def _generate_sign(self, token: str, timestamp: str, data: str) -> str:
+        token_val = token.split("_")[0] if token else ""
+        raw = f"{token_val}&{timestamp}&{self.APP_KEY}&{data}"
+        return md5(raw.encode("utf-8")).hexdigest()
+
+    def fetch_data(self) -> dict:
+        payload = {"itemId": self.item_id}
+        data_str = json.dumps(payload, separators=(",", ":"))
+        timestamp = str(int(time.time() * 1000))
+
+        # Obtenemos el token de la sesión
+        token = self.session.cookies.get("_m_h5_tk", "")
+        sign = self._generate_sign(token, timestamp, data_str)
+
+        params = {
+            "jsv": "2.7.2",
+            "appKey": self.APP_KEY,
+            "t": timestamp,
+            "sign": sign,
+            "v": "1.0",
+            "type": "originaljson",
+            "dataType": "json",
+            "api": "mtop.taobao.idle.pc.detail",
+            "data": data_str,
+        }
+
+        # Cambiamos a GET para mayor compatibilidad con MTOP PC
+        response = self.session.get(
+            self.API_URL,
+            headers=self.headers,
+            params=params,
+            timeout=15,
+        )
+
+        res_json = response.json()
+
+        # --- DEBUG CRÍTICO ---
+        # Esto te dirá por qué recibes nulls
+        ret_message = res_json.get("ret", ["No ret"])[0]
+        print(f"RESPUESTA SERVIDOR: {ret_message}")
+
+        if "SUCCESS" not in ret_message and "FAIL_SYS_TOKEN" in ret_message:
+            print("Actualizando token y reintentando...")
+            # La sesión ya tiene la cookie nueva de la respuesta anterior
+            return self.fetch_data()
+
+        return res_json
+
+    def parse_product(self, raw_json: dict) -> dict:
+        data = raw_json.get("data", {})
+        item = data.get("itemDO", {})
+        track = data.get("trackParams", {})
+
+        # Si item está vacío, es que el bloqueo fue total
+        if not item:
+            return {"ERROR": "El servidor no devolvió datos del producto. Posible bloqueo por IP/Fingerprint."}
+
+        images = [img.get("photoSearchUrl") for img in item.get("imageInfos", []) if img.get("photoSearchUrl")]
+
+        return {
+            "ITEM_ID": track.get("itemId") or self.item_id,
+            "TITLE": item.get("title"),
+            "PRICE": item.get("price"),
+            "IMAGES": images,
+            "SOLD_PRICE": item.get("soldPrice"),
+            "SELLER_ID": data.get("sellerDO", {}).get("sellerId"),
+        }
+
+    def scrape(self) -> dict:
+        raw = self.fetch_data()
+        return self.parse_product(raw)
+
+
+if __name__ == "__main__":
+    # ¡CUIDADO! Estas cookies duran muy poco
+    cookies = {
+        "_m_h5_tk": "e957e7ff4858ee6b86d77e544492687a_1768952645799",
+        "_m_h5_tk_enc": "1",
+        "cookie2": "1887efd6a7ab51064b86528b25a39ae8",
+        # El tfstk es el CULPABLE de los nulls si no coincide con tu IP
+        "tfstk": "gDbrfraMJc3fxJwG_1YUuoBh8px82ePbCTbBtBfd9XvkreTeK6fHFB9CtvWFnO1SPw1HL9WXH315Og6bTtXONH1hRBbeyZsSRLwJ86X67Rw_5P1RwEL3CR6B-Que-B4BKotleZDuuRw_5PNHejGuC_T5hZW29KcoE4XnnsvvTvAlKLxmnCR9-pXhKn4D1BioqBvknSRpnpYH-9f0gBJDKeYhKsvA-6fruCtuMR8Er7UQ5HpGZKun7tdymU49320luQk6I_Ai-2b2a3Q2Xj6VLeSh6M8Hu74hwO9vxg5YLVJlf1BDinGIRs5feN8l78uWGh51fUQg3VvFqTBw_TSyVvdmJj_d4vmHq2O2CSPqJe_gxDEShEoKvn4vgdNWNDnpqId2CSPqvDK0MIJ_a45..",
+    }
+    proxies = {
+        "http": "http://codify-dc-any:58ADAB79s03h8TJ@gw.netnut.net:5959",
+        "https": "http://codify-dc-any:58ADAB79s03h8TJ@gw.netnut.net:5959",
+    }
+
+    url = "https://www.goofish.com/item?id=995598771021"
+    handler = PdpHandler(url, cookies, proxies)
+    product = handler.scrape()
+    print(json.dumps(product, indent=2, ensure_ascii=False))
