@@ -7,7 +7,7 @@ from playwright_stealth import Stealth
 async def get_fresh_cookies(target_url, proxy_config):
     async with Stealth().use_async(async_playwright()) as p:
         browser = await p.chromium.launch(
-            headless=True,
+            headless=False,
             proxy={
                 "server": f"http://{proxy_config['server']}",
                 "username": proxy_config["user"],

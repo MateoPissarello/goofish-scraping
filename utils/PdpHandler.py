@@ -4,6 +4,7 @@ import time
 from urllib.parse import urlparse, parse_qs
 from hashlib import md5
 
+
 class PdpHandler:
     API_URL = "https://h5api.m.goofish.com/h5/mtop.taobao.idle.pc.detail/1.0/"
     APP_KEY = "34839810"
@@ -124,7 +125,6 @@ class PdpHandler:
         item = data.get("itemDO", {})
         track = data.get("trackParams", {})
 
-        # Si item está vacío, es que el bloqueo fue total
         if not item:
             return {
                 "ERROR": "El servidor no devolvió datos del producto. Posible bloqueo por IP/Fingerprint.",
@@ -148,10 +148,10 @@ class PdpHandler:
 
 if __name__ == "__main__":
     cookies = {
-        "_m_h5_tk": "e957e7ff4858ee6b86d77e544492687a_1768952645799",
-        "_m_h5_tk_enc": "1",
+        "_m_h5_tk": "6d3cddbed5d7e39b5ef0337b09a6e2f9_1768955062750",
+        "_m_h5_tk_enc": "da1b58ef0c7d052a08ef70fe052f120c",
         "cookie2": "1887efd6a7ab51064b86528b25a39ae8",
-        "tfstk": "gDbrfraMJc3fxJwG_1YUuoBh8px82ePbCTbBtBfd9XvkreTeK6fHFB9CtvWFnO1SPw1HL9WXH315Og6bTtXONH1hRBbeyZsSRLwJ86X67Rw_5P1RwEL3CR6B-Que-B4BKotleZDuuRw_5PNHejGuC_T5hZW29KcoE4XnnsvvTvAlKLxmnCR9-pXhKn4D1BioqBvknSRpnpYH-9f0gBJDKeYhKsvA-6fruCtuMR8Er7UQ5HpGZKun7tdymU49320luQk6I_Ai-2b2a3Q2Xj6VLeSh6M8Hu74hwO9vxg5YLVJlf1BDinGIRs5feN8l78uWGh51fUQg3VvFqTBw_TSyVvdmJj_d4vmHq2O2CSPqJe_gxDEShEoKvn4vgdNWNDnpqId2CSPqvDK0MIJ_a45..",
+        "tfstk": "g3ztEd4dK3c_iFQCeFjhnzXQly5ukMVNpRPWoxDMcJeLg-LMSq0icjMLUADGglDXMveqIc0_sZEYIkumIPqgDkeaNc2Yg1ljh-wxnlfhr5PZuq6okabu_oLAglztlKVI7j0Ff2Vdr5PZuWaOxUblkSgExmMbhh9BdvlrhqM6l6HIMb-XC-gf96hrNEGXlfgIdbkIhqgbhW1KgvGjlqwbO6h2h_BtpCMDkljfqlpy5q8XlyhtA4VsCnH3JfntF5tDlEtI6cH71vW9rMjS2RiYu_LLprHxmYowN3nUfWUx4r76RW0ZB0GUYtKxeoNg4uaciEH7VSasXk7vRVIrMz4JDfJoejxO9rt20cGeJgJY-EnU7HGKE1390noFTXHl96K20cGE9Yft6n-qYP5..-Que-B4BKotleZDuuRw_5PNHejGuC_T5hZW29KcoE4XnnsvvTvAlKLxmnCR9-pXhKn4D1BioqBvknSRpnpYH-9f0gBJDKeYhKsvA-6fruCtuMR8Er7UQ5HpGZKun7tdymU49320luQk6I_Ai-2b2a3Q2Xj6VLeSh6M8Hu74hwO9vxg5YLVJlf1BDinGIRs5feN8l78uWGh51fUQg3VvFqTBw_TSyVvdmJj_d4vmHq2O2CSPqJe_gxDEShEoKvn4vgdNWNDnpqId2CSPqvDK0MIJ_a45..",
     }
     proxies = {
         "http": "http://codify-dc-any:58ADAB79s03h8TJ@gw.netnut.net:5959",
