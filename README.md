@@ -80,11 +80,13 @@ La obtencion de productos se basa en un flujo híbrido: navegador para cookies +
 
 ## Estructura del proyecto
 
-- `utils/scraping.py`: obtencion de cookies, firma y scraping del endpoint.
+- `utils/scraping_repository.py`: obtencion de cookies, firma y scraping del endpoint.
 - `utils/CookieManager.py`: cache y refresh de cookies.
 - `utils/scrape_csv.py`: orquestacion del scraping masivo a CSV.
+- `utils/count_scraped.py`: reporte de productos scrapeados.
 - `main.py`: API FastAPI con endpoint de scraping.
 - `data/`: CSVs de entrada/salida de ejemplo.
+-
 
 ## Notas
 
