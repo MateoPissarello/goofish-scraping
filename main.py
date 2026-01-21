@@ -1,7 +1,8 @@
 from fastapi.responses import RedirectResponse
 from fastapi.openapi.utils import get_openapi
 from fastapi import FastAPI, Query
-from scraping import scrape_pdp
+from utils.CookieManager import CookieManager
+from utils.scrape_csv import scrape_one, get_fresh_cookies
 
 
 # =================================================================
@@ -61,7 +62,7 @@ async def redirect_to_docs():
 
 # Scraping function
 @app.get("/scrapePDP", tags=["Scraping"])
-async def scrape_pdp_endpoint(url: str = Query(..., description="The URL of the Goofish product to scrape")) -> list:
+async def scrape_pdp_endpoint(url: str = Query(..., description="The URL of the Goofish product to scrape")):
     """Expone el scraper como endpoint HTTP.
 
     Args:
@@ -70,7 +71,12 @@ async def scrape_pdp_endpoint(url: str = Query(..., description="The URL of the 
     Returns:
         Respuesta JSON del endpoint de detalle.
     """
-    return scrape_pdp(url)
+    try:
+        cookie_mgr = CookieManager(get_fresh_cookies, use_proxy=False)
+        data = await scrape_one(url, cookie_mgr=cookie_mgr, retries=2, timeout_s=10.0)
+    except Exception as e:
+        return {"URL": url, "ERROR": str(e)}
+    return data
 
 
 # =================================================================

@@ -2,6 +2,14 @@
 
 Scraper asincronico para extraer datos de productos de Goofish a partir de URLs y exponer un endpoint HTTP.
 
+## Nota
+
+La cantidad de productos que se pueden scrapear por ahora depende mucho de los recursos de la PC. Por eso se corrio el script en una maquina EC2 c6a.2xlarge (8 vCPU, 16 GiB RAM, red Up to 12.5 Gigabit) con 15 workers.
+
+Resultados:
+- **Total Productos Scrapeados**: 27.783
+   - **Total sin error**: 24084
+   - **Total con error**: 3699
 ## Requisitos
 
 - Python 3.11+
@@ -33,8 +41,8 @@ python utils/scrape_csv.py \
   --input data/goofish_urls.csv \
   --output data/goofish_products.csv \
   --workers 5 \
-  --chunk-size 10000 \
-  --retries 1
+  --retries 1 \
+  --timeout 45
 ```
 
 Ejecutar API:
@@ -60,13 +68,14 @@ La obtencion de productos se basa en un flujo híbrido: navegador para cookies +
    - Se hace un POST a `h5api.m.goofish.com` para obtener el JSON de detalle.
 
 3) **Concurrencia controlada y escalado**
-   - Se divide la lista de URLs en `chunk_size` (por defecto 10.000).
-   - Cada worker procesa un chunk con su propio `CookieManager` para reducir colisiones.
+   - Se encola cada URL y se reparte entre `workers` para balancear carga.
+   - Cada worker usa su propio `CookieManager` con lock interno para evitar colisiones.
+   - Se mantiene un cache compartido de URLs visitadas para evitar requests duplicados.
    - Se limitan reintentos a errores de token y se registra cada resultado en CSV.
 
 4) **Rendimiento y estabilidad**
    - Se reutilizan cookies entre muchas URLs hasta que el token expira.
-   - Se usa `httpx` async con timeouts para evitar bloqueos.
+   - Se usan timeouts a nivel request para evitar bloqueos prolongados.
    - El scraping es idempotente y se registra el estado por URL (OK/ERROR).
 
 ## Estructura del proyecto
@@ -79,5 +88,7 @@ La obtencion de productos se basa en un flujo híbrido: navegador para cookies +
 
 ## Notas
 
-- Para scraping masivo, ajustar `--workers` y `--chunk-size` segun los recursos.
+- Para scraping masivo, ajustar `--workers` y `--timeout` segun los recursos.
+- La cantidad de productos que se pueden scrapear por ahora depende mucho de los recursos de la PC.
+- Por eso se corrio el script en una maquina EC2 c6a.2xlarge (8 vCPU, 16 GiB RAM, red Up to 12.5 Gigabit) con 15 workers.
 - Si el endpoint devuelve errores de token, se refrescan cookies y se reintenta.
