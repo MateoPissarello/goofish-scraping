@@ -6,8 +6,10 @@ Scraper asincronico para extraer datos de productos de Goofish a partir de URLs 
 
 La cantidad de productos que se pueden scrapear por ahora depende mucho de los recursos de la PC. Por eso se corrio el script en una maquina EC2 c6a.2xlarge (8 vCPU, 16 GiB RAM, red Up to 12.5 Gigabit) con 15 workers.
 
-Resultados (placeholder): **N productos scrapeados**. Este numero es provisional porque el script sigue corriendo.
-
+Resultados:
+- **Total Productos Scrapeados**: 27.783
+   - **Total sin error**: 24084
+   - **Total con error**: 3699
 ## Requisitos
 
 - Python 3.11+
