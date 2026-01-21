@@ -24,7 +24,7 @@ Variables de entorno opcionales para proxy (solo si `--use-proxy`):
 - `PROXY_USER`
 - `PROXY_PASS`
 
-Crea un archivo `.env` en la raiz si queres cargar estas variables automaticamente.
+Crea un archivo `.env` en la raiz si quieres cargar estas variables automaticamente.
 
 ## Uso rapido
 
