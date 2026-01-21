@@ -2,10 +2,14 @@ import argparse
 import asyncio
 import csv
 import json
+import sys
 from pathlib import Path
 
-from CookieManager import CookieManager
-from scraping import get_fresh_cookies, parse_product, scrape_pdp
+if __package__ is None or __package__ == "":
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from utils.CookieManager import CookieManager
+from utils.scraping_repository import get_fresh_cookies, parse_product, scrape_pdp
 
 TOKEN_ERRORS = ("FAIL_SYS_TOKEN", "TOKEN_EMPTY", "RGV587_ERROR")
 OUTPUT_FIELDS = [
@@ -29,6 +33,7 @@ async def scrape_one(
     url: str,
     cookie_mgr: CookieManager,
     retries: int,
+    timeout_s: float,
 ) -> dict:
     """Scrapea una URL con reintentos y manejo de tokens.
 
@@ -36,6 +41,7 @@ async def scrape_one(
         url: URL del producto.
         cookie_mgr: Gestor de cookies para la sesion.
         retries: Reintentos cuando falla el token.
+        timeout_s: Timeout maximo por request.
 
     Returns:
         Diccionario con datos del producto o un error.
@@ -43,7 +49,18 @@ async def scrape_one(
     last_ret = ""
     for _ in range(retries + 1):
         cookies = await cookie_mgr.ensure(url)
-        result = await scrape_pdp(url, save_to_file=False, cookies=cookies, use_proxy=cookie_mgr.use_proxy)
+        try:
+            result = await asyncio.wait_for(
+                scrape_pdp(
+                    url,
+                    save_to_file=False,
+                    cookies=cookies,
+                    use_proxy=cookie_mgr.use_proxy,
+                ),
+                timeout=timeout_s,
+            )
+        except asyncio.TimeoutError:
+            return {"URL": url, "ERROR": "REQUEST_TIMEOUT"}
         ret = result.get("ret", [""])[0]
         last_ret = ret
 
@@ -95,79 +112,77 @@ def build_row(data: dict) -> dict:
     return row
 
 
-def split_chunks(urls: list[str], chunk_size: int) -> list[list[str]]:
-    """Divide la lista de URLs en chunks de tamano fijo.
-
-    Args:
-        urls: Lista de URLs a dividir.
-        chunk_size: Tamano maximo por chunk.
-
-    Returns:
-        Lista de listas con URLs agrupadas.
-    """
-    if chunk_size <= 0:
-        return [urls]
-    return [urls[i : i + chunk_size] for i in range(0, len(urls), chunk_size)]
-
-
 async def run(
     input_path: Path,
     output_path: Path,
     workers: int,
-    chunk_size: int,
     retries: int,
     use_proxy: bool,
+    timeout_s: float,
 ) -> None:
-    """Orquesta el scraping concurrente por chunks y genera el CSV.
+    """Orquesta el scraping concurrente por URLs y genera el CSV.
 
     Args:
         input_path: Ruta del CSV de entrada.
         output_path: Ruta del CSV de salida.
         workers: Cantidad de workers en paralelo.
-        chunk_size: Tamano de chunk por worker.
         retries: Reintentos por URL si falla el token.
         use_proxy: Indica si se usa proxy al obtener cookies.
+        timeout_s: Timeout maximo por URL.
     """
     urls = load_urls(input_path)
     if not urls:
         print("No se encontraron URLs en el CSV.")
         return
 
-    chunks = split_chunks(urls, chunk_size)
-    if not chunks:
-        print("No hay URLs para procesar.")
-        return
-
     if workers <= 0:
         workers = 1
-    workers = min(workers, len(chunks))
+    workers = min(workers, len(urls))
 
     lock = asyncio.Lock()
+    visited_lock = asyncio.Lock()
+    visited: set[str] = set()
     counter_lock = asyncio.Lock()
     counter = {"value": 0}
 
-    queue: asyncio.Queue[list[str]] = asyncio.Queue()
-    for chunk in chunks:
-        queue.put_nowait(chunk)
+    queue: asyncio.Queue[str] = asyncio.Queue()
+    for url in urls:
+        queue.put_nowait(url)
 
     async def worker() -> None:
         cookie_mgr = CookieManager(get_fresh_cookies, use_proxy=use_proxy)
         while True:
             try:
-                chunk = queue.get_nowait()
+                url = queue.get_nowait()
             except asyncio.QueueEmpty:
                 return
-            for url in chunk:
-                data = await scrape_one(url, cookie_mgr, retries)
-                row = build_row(data)
-                async with lock:
-                    writer.writerow(row)
-                    output_file.flush()
-                async with counter_lock:
-                    counter["value"] += 1
-                    current = counter["value"]
-                status = "ERROR" if data.get("ERROR") else "OK"
-                print(f"[{current}/{len(urls)}] {status} - {data.get('URL')}")
+            async with visited_lock:
+                if url in visited:
+                    data = {"URL": url, "ERROR": "DUPLICATE_URL"}
+                    row = build_row(data)
+                    async with lock:
+                        writer.writerow(row)
+                        output_file.flush()
+                    async with counter_lock:
+                        counter["value"] += 1
+                        current = counter["value"]
+                    print(f"[{current}/{len(urls)}] SKIP - {url} (duplicate)")
+                    queue.task_done()
+                    continue
+                visited.add(url)
+            try:
+                data = await scrape_one(url, cookie_mgr, retries, timeout_s)
+            except Exception as exc:
+                data = {"URL": url, "ERROR": f"EXCEPTION::{exc.__class__.__name__}"}
+            row = build_row(data)
+            async with lock:
+                writer.writerow(row)
+                output_file.flush()
+            async with counter_lock:
+                counter["value"] += 1
+                current = counter["value"]
+            status = "ERROR" if data.get("ERROR") else "OK"
+            print(f"[{current}/{len(urls)}] {status} - {data.get('URL')}")
             queue.task_done()
 
     with output_path.open("w", encoding="utf-8", newline="") as output_file:
@@ -183,9 +198,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Scraper paralelo para URLs de Goofish en CSV.")
     parser.add_argument("--input", default="../data/goofish_urls.csv", help="CSV de entrada con columna URL")
     parser.add_argument("--output", default="../data/goofish_products.csv", help="CSV de salida con datos completos")
-    parser.add_argument("--workers", type=int, default=5, help="Cantidad de workers (chunks en paralelo)")
-    parser.add_argument("--chunk-size", type=int, default=10000, help="Cantidad de URLs por worker")
+    parser.add_argument("--workers", type=int, default=5, help="Cantidad de workers en paralelo")
     parser.add_argument("--retries", type=int, default=1, help="Reintentos por URL si falla el token")
+    parser.add_argument("--timeout", type=float, default=45.0, help="Timeout maximo por request en segundos")
     parser.add_argument("--use-proxy", action="store_true", help="Usar proxy al refrescar cookies")
     args = parser.parse_args()
 
@@ -194,8 +209,8 @@ if __name__ == "__main__":
             input_path=Path(args.input),
             output_path=Path(args.output),
             workers=args.workers,
-            chunk_size=args.chunk_size,
             retries=args.retries,
             use_proxy=args.use_proxy,
+            timeout_s=args.timeout,
         )
     )
