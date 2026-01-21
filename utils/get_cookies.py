@@ -4,35 +4,44 @@ from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 
 
-async def get_fresh_cookies(target_url, proxy_config):
-    async with Stealth().use_async(async_playwright()) as p:
-        browser = await p.chromium.launch(
-            headless=False,
-            proxy={
-                "server": f"http://{proxy_config['server']}",
-                "username": proxy_config["user"],
-                "password": proxy_config["pass"],
-            },
-        )
+async def get_fresh_cookies(target_url, proxy_config, timeout=60.0):
+    browser = None
 
-        context = await browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    async def _fetch():
+        nonlocal browser
+        async with Stealth().use_async(async_playwright()) as p:
+            browser = await p.chromium.launch(
+                headless=False,
+                proxy={
+                    "server": f"http://{proxy_config['server']}",
+                    "username": proxy_config["user"],
+                    "password": proxy_config["pass"],
+                },
             )
-        )
 
-        page = await context.new_page()
+            context = await browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                )
+            )
 
-        print("Navegando a Goofish con la IP del proxy...")
-        await page.goto(target_url, wait_until="networkidle")
+            page = await context.new_page()
 
-        await asyncio.sleep(5)
+            print("Navegando a Goofish con la IP del proxy...")
+            await page.goto(target_url, wait_until="networkidle", timeout=30000)
 
-        cookies_list = await context.cookies()
-        cookies_dict = {c["name"]: c["value"] for c in cookies_list}
+            await asyncio.sleep(5)
 
-        await browser.close()
-        return cookies_dict
+            cookies_list = await context.cookies()
+            cookies_dict = {c["name"]: c["value"] for c in cookies_list}
+
+            return cookies_dict
+
+    try:
+        return await asyncio.wait_for(_fetch(), timeout=timeout)
+    finally:
+        if browser is not None:
+            await browser.close()
 
 
 proxy = {

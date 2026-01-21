@@ -8,8 +8,8 @@ class ScrapeWorker:
         self.proxy = proxy
         self.cookies = None
 
-    def init_session(self, url):
-        self.cookies = asyncio.run(get_fresh_cookies(url, self.proxy))
+    def init_session(self, url, timeout=60.0):
+        self.cookies = asyncio.run(asyncio.wait_for(get_fresh_cookies(url, self.proxy), timeout=timeout))
 
     def scrape_item(self, url):
         if not self.cookies:

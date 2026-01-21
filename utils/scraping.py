@@ -61,10 +61,8 @@ async def get_fresh_cookies(target_url: str, use_proxy: bool = False) -> dict:
         page = await context.new_page()
 
         logger.info("Navegando a: %s", target_url)
-        await page.goto(target_url, wait_until="networkidle")
-
-        # Esperar un poco para que se establezcan todas las cookies
-        await page.wait_for_timeout(5000)
+        await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
+        await page.wait_for_timeout(2000)
 
         cookies_list = await context.cookies()
         cookies_dict = {c["name"]: c["value"] for c in cookies_list}
@@ -171,17 +169,31 @@ async def scrape_pdp(url: str, save_to_file: bool = True, cookies: dict = None, 
 
     transport = httpx.AsyncHTTPTransport(proxy=proxy_url) if proxy_url else None
 
+    # Timeout más estricto y controlado: si la conexión se cuelga o tarda
+    # demasiado, queremos fallar rápido y devolver un error manejable.
+    timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=30.0)
+
     async with httpx.AsyncClient(
         cookies=cookies,
-        timeout=30.0,
+        timeout=timeout,
         transport=transport,
     ) as client:
-        response = await client.post(
-            API_URL,
-            params=params,
-            headers=headers,
-            content=body_data,
-        )
+        try:
+            response = await client.post(
+                API_URL,
+                params=params,
+                headers=headers,
+                content=body_data,
+            )
+        except httpx.ConnectTimeout as exc:
+            logger.error("Connect timeout al solicitar %s: %s", url, exc)
+            return {"ret": ["CONNECT_TIMEOUT"], "data": {}, "URL": url}
+        except httpx.ReadTimeout as exc:
+            logger.error("Read timeout al solicitar %s: %s", url, exc)
+            return {"ret": ["READ_TIMEOUT"], "data": {}, "URL": url}
+        except httpx.RequestError as exc:
+            logger.error("Error de red al solicitar %s: %s", url, exc)
+            return {"ret": [f"REQUEST_ERROR::{exc.__class__.__name__}"], "data": {}, "URL": url}
 
         # Parsear la respuesta
         result = response.json()
@@ -262,12 +274,16 @@ async def batch_processing(
             last_ret = ""
             for _ in range(retries + 1):
                 cookies = await cookie_mgr.ensure(url)
-                result = await scrape_pdp(
-                    url,
-                    save_to_file=save_to_file,
-                    cookies=cookies,
-                    use_proxy=use_proxy,
-                )
+                try:
+                    result = await scrape_pdp(
+                        url,
+                        save_to_file=save_to_file,
+                        cookies=cookies,
+                        use_proxy=use_proxy,
+                    )
+                except Exception as exc:  # salvaguarda para que nunca reviente el batch
+                    logger.exception("Error inesperado scrapeando %s: %s", url, exc)
+                    return index, {"URL": url, "ERROR": f"EXCEPTION::{exc.__class__.__name__}"}
                 ret_message = result.get("ret", [""])[0]
                 last_ret = ret_message
                 if ret_message and "SUCCESS" not in ret_message:
