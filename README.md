@@ -62,6 +62,7 @@ La obtencion de productos se basa en un flujo híbrido: navegador para cookies +
 3) **Concurrencia controlada y escalado**
    - Se encola cada URL y se reparte entre `workers` para balancear carga.
    - Cada worker usa su propio `CookieManager` con lock interno para evitar colisiones.
+   - Se mantiene un cache compartido de URLs visitadas para evitar requests duplicados.
    - Se limitan reintentos a errores de token y se registra cada resultado en CSV.
 
 4) **Rendimiento y estabilidad**

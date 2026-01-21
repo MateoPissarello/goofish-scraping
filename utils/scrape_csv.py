@@ -136,6 +136,8 @@ async def run(
     workers = min(workers, len(urls))
 
     lock = asyncio.Lock()
+    visited_lock = asyncio.Lock()
+    visited: set[str] = set()
     counter_lock = asyncio.Lock()
     counter = {"value": 0}
 
@@ -150,6 +152,20 @@ async def run(
                 url = queue.get_nowait()
             except asyncio.QueueEmpty:
                 return
+            async with visited_lock:
+                if url in visited:
+                    data = {"URL": url, "ERROR": "DUPLICATE_URL"}
+                    row = build_row(data)
+                    async with lock:
+                        writer.writerow(row)
+                        output_file.flush()
+                    async with counter_lock:
+                        counter["value"] += 1
+                        current = counter["value"]
+                    print(f"[{current}/{len(urls)}] SKIP - {url} (duplicate)")
+                    queue.task_done()
+                    continue
+                visited.add(url)
             try:
                 data = await scrape_one(url, cookie_mgr, retries, timeout_s)
             except Exception as exc:
