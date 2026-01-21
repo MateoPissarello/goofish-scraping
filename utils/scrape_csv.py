@@ -4,6 +4,7 @@ import csv
 import json
 from pathlib import Path
 
+from CookieManager import CookieManager
 from scraping import get_fresh_cookies, parse_product, scrape_pdp
 
 TOKEN_ERRORS = ("FAIL_SYS_TOKEN", "TOKEN_EMPTY", "RGV587_ERROR")
@@ -24,30 +25,21 @@ OUTPUT_FIELDS = [
 ]
 
 
-class CookieManager:
-    def __init__(self, use_proxy: bool):
-        self.use_proxy = use_proxy
-        self._cookies = None
-        self._lock = asyncio.Lock()
-
-    async def ensure(self, url: str) -> dict:
-        if self._cookies is None:
-            async with self._lock:
-                if self._cookies is None:
-                    self._cookies = await get_fresh_cookies(url, use_proxy=self.use_proxy)
-        return self._cookies
-
-    async def refresh(self, url: str) -> dict:
-        async with self._lock:
-            self._cookies = await get_fresh_cookies(url, use_proxy=self.use_proxy)
-        return self._cookies
-
-
 async def scrape_one(
     url: str,
     cookie_mgr: CookieManager,
     retries: int,
 ) -> dict:
+    """Scrapea una URL con reintentos y manejo de tokens.
+
+    Args:
+        url: URL del producto.
+        cookie_mgr: Gestor de cookies para la sesion.
+        retries: Reintentos cuando falla el token.
+
+    Returns:
+        Diccionario con datos del producto o un error.
+    """
     last_ret = ""
     for _ in range(retries + 1):
         cookies = await cookie_mgr.ensure(url)
@@ -71,6 +63,14 @@ async def scrape_one(
 
 
 def load_urls(csv_path: Path) -> list[str]:
+    """Lee URLs desde un CSV con columna URL.
+
+    Args:
+        csv_path: Ruta al CSV de entrada.
+
+    Returns:
+        Lista de URLs encontradas.
+    """
     with csv_path.open("r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         urls = []
@@ -82,12 +82,29 @@ def load_urls(csv_path: Path) -> list[str]:
 
 
 def build_row(data: dict) -> dict:
+    """Construye una fila completa con todas las columnas esperadas.
+
+    Args:
+        data: Datos parciales del producto.
+
+    Returns:
+        Diccionario con todas las columnas definidas en OUTPUT_FIELDS.
+    """
     row = {key: "" for key in OUTPUT_FIELDS}
     row.update({key: value for key, value in data.items() if key in row})
     return row
 
 
 def split_chunks(urls: list[str], chunk_size: int) -> list[list[str]]:
+    """Divide la lista de URLs en chunks de tamano fijo.
+
+    Args:
+        urls: Lista de URLs a dividir.
+        chunk_size: Tamano maximo por chunk.
+
+    Returns:
+        Lista de listas con URLs agrupadas.
+    """
     if chunk_size <= 0:
         return [urls]
     return [urls[i : i + chunk_size] for i in range(0, len(urls), chunk_size)]
@@ -101,6 +118,16 @@ async def run(
     retries: int,
     use_proxy: bool,
 ) -> None:
+    """Orquesta el scraping concurrente por chunks y genera el CSV.
+
+    Args:
+        input_path: Ruta del CSV de entrada.
+        output_path: Ruta del CSV de salida.
+        workers: Cantidad de workers en paralelo.
+        chunk_size: Tamano de chunk por worker.
+        retries: Reintentos por URL si falla el token.
+        use_proxy: Indica si se usa proxy al obtener cookies.
+    """
     urls = load_urls(input_path)
     if not urls:
         print("No se encontraron URLs en el CSV.")
@@ -124,7 +151,7 @@ async def run(
         queue.put_nowait(chunk)
 
     async def worker() -> None:
-        cookie_mgr = CookieManager(use_proxy=use_proxy)
+        cookie_mgr = CookieManager(get_fresh_cookies, use_proxy=use_proxy)
         while True:
             try:
                 chunk = queue.get_nowait()

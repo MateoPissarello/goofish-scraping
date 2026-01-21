@@ -1,63 +1,81 @@
 import asyncio
-import logging
-import httpx
 import json
+import logging
 import time
 from hashlib import md5
-from urllib.parse import urlparse, parse_qs
+from os import getenv
+from dotenv import load_dotenv
+from urllib.parse import parse_qs, urlparse
+
+import httpx
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 
-test_url = "https://www.goofish.com/item?id=894551126004"
+from CookieManager import CookieManager
 
-# Configuración de la API
+load_dotenv()
 API_URL = "https://h5api.m.goofish.com/h5/mtop.taobao.idle.pc.detail/1.0/"
 APP_KEY = "34839810"
-
-# Configuración del proxy (opcional)
-PROXY_CONFIG = {
-    "server": "gw.netnut.net:5959",
-    "user": "codify-dc-any",
-    "pass": "58ADAB79s03h8TJ",
-}
-
-# Cookies (se actualizarán automáticamente)
-COOKIES = None
 TOKEN_ERRORS = ("FAIL_SYS_TOKEN", "TOKEN_EMPTY", "RGV587_ERROR")
+TEST_URL = "https://www.goofish.com/item?id=894551126004"
+
+PROXY_SERVER = getenv("PROXY_SERVER")
+PROXY_USER = getenv("PROXY_USER")
+PROXY_PASS = getenv("PROXY_PASS")
+
 logger = logging.getLogger(__name__)
 
 
-async def get_fresh_cookies(target_url: str, use_proxy: bool = False) -> dict:
-    """
-    Obtiene cookies frescas navegando a la página con Playwright.
+def _build_proxy_settings(use_proxy: bool) -> tuple[dict | None, str | None]:
+    """Construye configuracion de proxy para Playwright y httpx.
 
     Args:
-        target_url: URL de la página para obtener cookies
-        use_proxy: Si es True, usa el proxy configurado
+        use_proxy: Indica si se debe construir configuracion de proxy.
 
     Returns:
-        dict: Diccionario con las cookies obtenidas
+        Tupla con (proxy_settings, proxy_url). Ambos None si no se usa proxy.
+
+    Raises:
+        ValueError: Si faltan variables de entorno del proxy.
+    """
+    if not use_proxy:
+        return None, None
+    if not PROXY_SERVER or not PROXY_USER or not PROXY_PASS:
+        raise ValueError("Falta configurar PROXY_SERVER/PROXY_USER/PROXY_PASS")
+    proxy_settings = {
+        "server": f"http://{PROXY_SERVER}",
+        "username": PROXY_USER,
+        "password": PROXY_PASS,
+    }
+    proxy_url = f"http://{PROXY_USER}:{PROXY_PASS}@{PROXY_SERVER}"
+    return proxy_settings, proxy_url
+
+
+async def get_fresh_cookies(target_url: str, use_proxy: bool = False) -> dict:
+    """Abre un navegador stealth y devuelve cookies utiles para Goofish.
+
+    Args:
+        target_url: URL que se visita para generar cookies.
+        use_proxy: Indica si se usa proxy en el navegador.
+
+    Returns:
+        Diccionario de cookies obtenidas desde el navegador.
     """
     logger.info("Obteniendo cookies frescas con Playwright...")
-
-    proxy_settings = None
-    if use_proxy:
-        proxy_settings = {
-            "server": f"http://{PROXY_CONFIG['server']}",
-            "username": PROXY_CONFIG["user"],
-            "password": PROXY_CONFIG["pass"],
-        }
+    proxy_settings, _ = _build_proxy_settings(use_proxy)
 
     async with Stealth().use_async(async_playwright()) as p:
         browser = await p.chromium.launch(
             headless=True,
             proxy=proxy_settings,
         )
-
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/143.0.0.0 Safari/537.36"
+            )
         )
-
         page = await context.new_page()
 
         logger.info("Navegando a: %s", target_url)
@@ -69,62 +87,77 @@ async def get_fresh_cookies(target_url: str, use_proxy: bool = False) -> dict:
 
         await browser.close()
 
-        logger.info("Cookies obtenidas: %d cookies", len(cookies_dict))
-        logger.info("  - _m_h5_tk: %s", "ok" if "_m_h5_tk" in cookies_dict else "missing")
-        logger.info("  - cookie2: %s", "ok" if "cookie2" in cookies_dict else "missing")
+    logger.info("Cookies obtenidas: %d cookies", len(cookies_dict))
+    logger.info("  - _m_h5_tk: %s", "ok" if "_m_h5_tk" in cookies_dict else "missing")
+    logger.info("  - cookie2: %s", "ok" if "cookie2" in cookies_dict else "missing")
 
-        return cookies_dict
+    return cookies_dict
 
 
 def extract_item_id(url: str) -> str:
-    """Extrae el item_id de la URL"""
+    """Extrae el item_id desde el querystring de la URL.
+
+    Args:
+        url: URL del producto de Goofish.
+
+    Returns:
+        Valor del parametro "id".
+
+    Raises:
+        ValueError: Si la URL no contiene el parametro "id".
+    """
     parsed = urlparse(url)
     qs = parse_qs(parsed.query)
     if "id" not in qs:
-        raise ValueError("URL sin parámetro 'id'")
+        raise ValueError("URL sin parametro 'id'")
     return qs["id"][0]
 
 
 def generate_sign(token: str, timestamp: str, data: str) -> str:
-    """Genera la firma MD5 requerida por la API"""
+    """Genera la firma MD5 requerida por el endpoint mtop.
+
+    Args:
+        token: Token de cookies (_m_h5_tk) para firmar.
+        timestamp: Timestamp en milisegundos.
+        data: JSON serializado que se envia al endpoint.
+
+    Returns:
+        Hash MD5 con la firma requerida por el API.
+    """
     token_val = token.split("_")[0] if token else ""
     raw = f"{token_val}&{timestamp}&{APP_KEY}&{data}"
     return md5(raw.encode("utf-8")).hexdigest()
 
 
-async def scrape_pdp(url: str, save_to_file: bool = True, cookies: dict = None, use_proxy: bool = False):
-    """
-    Hace scraping de una página de detalle de producto (PDP) de Goofish.
+async def scrape_pdp(
+    url: str,
+    save_to_file: bool = True,
+    cookies: dict | None = None,
+    use_proxy: bool = False,
+) -> dict:
+    """Consulta el endpoint de detalle y devuelve el JSON de producto.
 
     Args:
-        url: URL del producto en formato https://www.goofish.com/item?id=XXXXXX
-        save_to_file: Si es True, guarda el resultado en un archivo TXT
-        cookies: Diccionario de cookies (si es None, se obtendrán automáticamente)
-        use_proxy: Si es True, usa proxy para obtener cookies
+        url: URL del producto de Goofish.
+        save_to_file: Indica si se guarda la respuesta en un archivo local.
+        cookies: Cookies a reutilizar en la peticion.
+        use_proxy: Indica si se usa proxy en la peticion HTTP.
 
     Returns:
-        dict: Respuesta JSON de la API
+        Diccionario con el JSON de respuesta del endpoint.
     """
-    # Si no se proporcionan cookies, obtenerlas automáticamente
     if cookies is None:
         logger.warning("No se proporcionaron cookies, obteniendo cookies frescas...")
         cookies = await get_fresh_cookies(url, use_proxy=use_proxy)
 
-    # Extraer el item_id de la URL
     item_id = extract_item_id(url)
-
-    # Preparar el payload
     payload = {"itemId": item_id}
     data_str = json.dumps(payload, separators=(",", ":"))
 
-    # Obtener el token de las cookies
     token = cookies.get("_m_h5_tk", "")
-
-    # Generar timestamp y firma
     timestamp = str(int(time.time() * 1000))
     sign = generate_sign(token, timestamp, data_str)
 
-    # Construir parámetros de la URL
     params = {
         "jsv": "2.7.2",
         "appKey": APP_KEY,
@@ -140,7 +173,6 @@ async def scrape_pdp(url: str, save_to_file: bool = True, cookies: dict = None, 
         "spm_cnt": "a21ybx.item.0.0",
     }
 
-    # Construir headers
     headers = {
         "accept": "application/json",
         "accept-language": "es-ES,es;q=0.9",
@@ -156,21 +188,15 @@ async def scrape_pdp(url: str, save_to_file: bool = True, cookies: dict = None, 
         "sec-fetch-dest": "empty",
         "sec-fetch-mode": "cors",
         "sec-fetch-site": "same-site",
-        "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36",
+        "user-agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/143.0.0.0 Safari/537.36"
+        ),
     }
 
-    # Preparar el body como URL encoded
-    body_data = f"data={data_str}"
-
-    # Hacer la petición con httpx
-    proxy_url = None
-    if use_proxy:
-        proxy_url = f"http://{PROXY_CONFIG['user']}:{PROXY_CONFIG['pass']}@{PROXY_CONFIG['server']}"
-
+    _, proxy_url = _build_proxy_settings(use_proxy)
     transport = httpx.AsyncHTTPTransport(proxy=proxy_url) if proxy_url else None
-
-    # Timeout más estricto y controlado: si la conexión se cuelga o tarda
-    # demasiado, queremos fallar rápido y devolver un error manejable.
     timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=30.0)
 
     async with httpx.AsyncClient(
@@ -183,7 +209,7 @@ async def scrape_pdp(url: str, save_to_file: bool = True, cookies: dict = None, 
                 API_URL,
                 params=params,
                 headers=headers,
-                content=body_data,
+                content=f"data={data_str}",
             )
         except httpx.ConnectTimeout as exc:
             logger.error("Connect timeout al solicitar %s: %s", url, exc)
@@ -195,30 +221,34 @@ async def scrape_pdp(url: str, save_to_file: bool = True, cookies: dict = None, 
             logger.error("Error de red al solicitar %s: %s", url, exc)
             return {"ret": [f"REQUEST_ERROR::{exc.__class__.__name__}"], "data": {}, "URL": url}
 
-        # Parsear la respuesta
-        result = response.json()
+    result = response.json()
+    ret_message = result.get("ret", ["No ret"])[0]
+    logger.info("Estado de la respuesta: %s", ret_message)
 
-        # Verificar el estado de la respuesta
-        ret_message = result.get("ret", ["No ret"])[0]
-        logger.info("Estado de la respuesta: %s", ret_message)
+    if save_to_file:
+        filename = f"response_{item_id}.txt"
+        with open(filename, "w", encoding="utf-8") as f:
+            f.write(json.dumps(result, indent=2, ensure_ascii=False))
+        logger.info("Resultado guardado en: %s", filename)
 
-        # Guardar el resultado en un archivo TXT
-        if save_to_file:
-            filename = f"response_{item_id}.txt"
-            with open(filename, "w", encoding="utf-8") as f:
-                f.write(json.dumps(result, indent=2, ensure_ascii=False))
-            logger.info("Resultado guardado en: %s", filename)
-
-        return result
+    return result
 
 
-async def parse_product(product: dict):
+async def parse_product(product: dict) -> dict:
+    """Normaliza el payload de Goofish a un esquema plano.
+
+    Args:
+        product: Respuesta cruda del endpoint de detalle.
+
+    Returns:
+        Diccionario con campos normalizados del producto.
+    """
     data = product.get("data", {})
     track = data.get("trackParams", {})
     item = data.get("itemDO", {})
     seller = data.get("sellerDO", {})
 
-    parsed = {
+    return {
         "ITEM_ID": track.get("itemId"),
         "CATEGORY_ID": track.get("categoryId"),
         "TITLE": item.get("title"),
@@ -232,28 +262,6 @@ async def parse_product(product: dict):
         "SELLER_ID": seller.get("sellerId"),
     }
 
-    return parsed
-
-
-class CookieManager:
-    def __init__(self, use_proxy: bool):
-        self.use_proxy = use_proxy
-        self._cookies = None
-        self._lock = asyncio.Lock()
-
-    async def ensure(self, url: str) -> dict:
-        if self._cookies is None:
-            async with self._lock:
-                if self._cookies is None:
-                    self._cookies = await get_fresh_cookies(url, use_proxy=self.use_proxy)
-        return self._cookies
-
-    async def refresh(self, url: str) -> dict:
-        async with self._lock:
-            logger.info("Refrescando cookies...")
-            self._cookies = await get_fresh_cookies(url, use_proxy=self.use_proxy)
-        return self._cookies
-
 
 async def batch_processing(
     urls: list[str],
@@ -262,10 +270,22 @@ async def batch_processing(
     use_proxy: bool = False,
     save_to_file: bool = False,
 ) -> list[dict]:
+    """Procesa multiples URLs en paralelo con reintentos y cookies compartidas.
+
+    Args:
+        urls: Lista de URLs de productos.
+        concurrency: Cantidad maxima de tareas concurrentes.
+        retries: Reintentos por URL cuando hay errores de token.
+        use_proxy: Indica si se usa proxy al obtener cookies.
+        save_to_file: Indica si se guarda el JSON de cada respuesta.
+
+    Returns:
+        Lista de resultados en el mismo orden que las URLs de entrada.
+    """
     if not urls:
         return []
 
-    cookie_mgr = CookieManager(use_proxy=use_proxy)
+    cookie_mgr = CookieManager(get_fresh_cookies, use_proxy=use_proxy)
     semaphore = asyncio.Semaphore(concurrency)
 
     async def _worker(index: int, url: str) -> tuple[int, dict]:
@@ -281,7 +301,7 @@ async def batch_processing(
                         cookies=cookies,
                         use_proxy=use_proxy,
                     )
-                except Exception as exc:  # salvaguarda para que nunca reviente el batch
+                except Exception as exc:
                     logger.exception("Error inesperado scrapeando %s: %s", url, exc)
                     return index, {"URL": url, "ERROR": f"EXCEPTION::{exc.__class__.__name__}"}
                 ret_message = result.get("ret", [""])[0]
@@ -305,12 +325,3 @@ async def batch_processing(
     tasks = [asyncio.create_task(_worker(i, url)) for i, url in enumerate(urls)]
     results = [await task for task in asyncio.as_completed(tasks)]
     return [data for _, data in sorted(results, key=lambda x: x[0])]
-
-
-if __name__ == "__main__":
-    print("=== Modo automático: Obteniendo cookies frescas ===\n")
-    result = asyncio.run(scrape_pdp(test_url, use_proxy=False))
-
-    parsed = asyncio.run(parse_product(result))
-    print("\n--- RESULTADO ---")
-    print(json.dumps(parsed, indent=2, ensure_ascii=False))

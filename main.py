@@ -11,6 +11,11 @@ YOUR_NAME = "Mateo Pissarello"  # TODO: UPDATE WITH YOUR NAME
 
 
 def custom_openapi():
+    """Personaliza el schema OpenAPI para limpiar respuestas de validacion.
+
+    Returns:
+        Diccionario OpenAPI modificado.
+    """
     if app.openapi_schema:
         return app.openapi_schema
     openapi_schema = get_openapi(
@@ -46,12 +51,25 @@ app.openapi = custom_openapi
 # Redirect to the documentation
 @app.get("/", include_in_schema=False, response_class=RedirectResponse, tags=["Root"])
 async def redirect_to_docs():
+    """Redirige al usuario hacia la documentacion interactiva.
+
+    Returns:
+        Ruta de redireccion a la documentacion.
+    """
     return "/docs"
 
 
 # Scraping function
 @app.get("/scrapePDP", tags=["Scraping"])
 async def scrape_pdp_endpoint(url: str = Query(..., description="The URL of the Goofish product to scrape")) -> list:
+    """Expone el scraper como endpoint HTTP.
+
+    Args:
+        url: URL del producto a scrapear.
+
+    Returns:
+        Respuesta JSON del endpoint de detalle.
+    """
     return scrape_pdp(url)
 
 
