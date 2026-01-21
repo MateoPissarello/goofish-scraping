@@ -2,6 +2,12 @@
 
 Scraper asincronico para extraer datos de productos de Goofish a partir de URLs y exponer un endpoint HTTP.
 
+## Nota
+
+La cantidad de productos que se pueden scrapear por ahora depende mucho de los recursos de la PC. Por eso se corrio el script en una maquina EC2 c6a.2xlarge (8 vCPU, 16 GiB RAM, red Up to 12.5 Gigabit) con 15 workers.
+
+Resultados (placeholder): **N productos scrapeados**. Este numero es provisional porque el script sigue corriendo.
+
 ## Requisitos
 
 - Python 3.11+
@@ -81,4 +87,6 @@ La obtencion de productos se basa en un flujo híbrido: navegador para cookies +
 ## Notas
 
 - Para scraping masivo, ajustar `--workers` y `--timeout` segun los recursos.
+- La cantidad de productos que se pueden scrapear por ahora depende mucho de los recursos de la PC.
+- Por eso se corrio el script en una maquina EC2 c6a.2xlarge (8 vCPU, 16 GiB RAM, red Up to 12.5 Gigabit) con 15 workers.
 - Si el endpoint devuelve errores de token, se refrescan cookies y se reintenta.

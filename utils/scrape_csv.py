@@ -2,10 +2,14 @@ import argparse
 import asyncio
 import csv
 import json
+import sys
 from pathlib import Path
 
-from CookieManager import CookieManager
-from scraping import get_fresh_cookies, parse_product, scrape_pdp
+if __package__ is None or __package__ == "":
+    sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from utils.CookieManager import CookieManager
+from utils.scraping_repository import get_fresh_cookies, parse_product, scrape_pdp
 
 TOKEN_ERRORS = ("FAIL_SYS_TOKEN", "TOKEN_EMPTY", "RGV587_ERROR")
 OUTPUT_FIELDS = [

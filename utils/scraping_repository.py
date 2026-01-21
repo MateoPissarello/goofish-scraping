@@ -1,4 +1,3 @@
-import asyncio
 import json
 import logging
 import time
@@ -11,7 +10,6 @@ import httpx
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
 
-from CookieManager import CookieManager
 
 load_dotenv()
 API_URL = "https://h5api.m.goofish.com/h5/mtop.taobao.idle.pc.detail/1.0/"
@@ -261,67 +259,3 @@ async def parse_product(product: dict) -> dict:
         "GMT_CREATE": item.get("gmtCreate"),
         "SELLER_ID": seller.get("sellerId"),
     }
-
-
-async def batch_processing(
-    urls: list[str],
-    concurrency: int = 5,
-    retries: int = 1,
-    use_proxy: bool = False,
-    save_to_file: bool = False,
-) -> list[dict]:
-    """Procesa multiples URLs en paralelo con reintentos y cookies compartidas.
-
-    Args:
-        urls: Lista de URLs de productos.
-        concurrency: Cantidad maxima de tareas concurrentes.
-        retries: Reintentos por URL cuando hay errores de token.
-        use_proxy: Indica si se usa proxy al obtener cookies.
-        save_to_file: Indica si se guarda el JSON de cada respuesta.
-
-    Returns:
-        Lista de resultados en el mismo orden que las URLs de entrada.
-    """
-    if not urls:
-        return []
-
-    cookie_mgr = CookieManager(get_fresh_cookies, use_proxy=use_proxy)
-    semaphore = asyncio.Semaphore(concurrency)
-
-    async def _worker(index: int, url: str) -> tuple[int, dict]:
-        async with semaphore:
-            logger.info("Scrape start [%s/%s]: %s", index + 1, len(urls), url)
-            last_ret = ""
-            for _ in range(retries + 1):
-                cookies = await cookie_mgr.ensure(url)
-                try:
-                    result = await scrape_pdp(
-                        url,
-                        save_to_file=save_to_file,
-                        cookies=cookies,
-                        use_proxy=use_proxy,
-                    )
-                except Exception as exc:
-                    logger.exception("Error inesperado scrapeando %s: %s", url, exc)
-                    return index, {"URL": url, "ERROR": f"EXCEPTION::{exc.__class__.__name__}"}
-                ret_message = result.get("ret", [""])[0]
-                last_ret = ret_message
-                if ret_message and "SUCCESS" not in ret_message:
-                    if any(err in ret_message for err in TOKEN_ERRORS):
-                        logger.warning("Token error, reintentando con cookies nuevas: %s", ret_message)
-                        await cookie_mgr.refresh(url)
-                        continue
-                    logger.error("Scrape error: %s", ret_message)
-                    return index, {"URL": url, "ERROR": ret_message}
-
-                parsed = await parse_product(result)
-                parsed["URL"] = url
-                logger.info("Scrape ok: %s", url)
-                return index, parsed
-
-            logger.error("Scrape agotado: %s", url)
-            return index, {"URL": url, "ERROR": last_ret or "UNKNOWN_ERROR"}
-
-    tasks = [asyncio.create_task(_worker(i, url)) for i, url in enumerate(urls)]
-    results = [await task for task in asyncio.as_completed(tasks)]
-    return [data for _, data in sorted(results, key=lambda x: x[0])]
