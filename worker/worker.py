@@ -93,9 +93,12 @@ async def handle_message(msg, scraper, semaphore):
 
         try:
             mark_job(product_url, "IN_PROGRESS")
+            start = time.monotonic()
 
             data = await scraper.scrape(product_url)
 
+            duration = time.monotonic() - start
+            logging.info("Scrape URL %s tomó %.2f segundos", product_url, duration)
             save_data(data)
             mark_job(product_url, "SUCCESS")
 
