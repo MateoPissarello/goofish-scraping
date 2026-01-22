@@ -5,10 +5,12 @@ from hashlib import md5
 from os import getenv
 from dotenv import load_dotenv
 from urllib.parse import parse_qs, urlparse
-
+import asyncio
 import httpx
 from playwright.async_api import async_playwright
 from playwright_stealth import Stealth
+
+from worker.utils.CookieManager import CookieManager
 
 
 load_dotenv()
@@ -17,19 +19,20 @@ APP_KEY = "34839810"
 TOKEN_ERRORS = ("FAIL_SYS_TOKEN", "TOKEN_EMPTY", "RGV587_ERROR")
 TEST_URL = "https://www.goofish.com/item?id=894551126004"
 
-PROXY_SERVER = getenv("PROXY_SERVER")
-PROXY_USER = getenv("PROXY_USER")
-PROXY_PASS = getenv("PROXY_PASS")
+
+MAX_TOKEN_RETRIES = 2
 
 logger = logging.getLogger(__name__)
 
 
-def _build_proxy_settings(use_proxy: bool) -> tuple[dict | None, str | None]:
+def _build_proxy_settings(use_proxy: bool, proxy_server: str | None = None, proxy_user: str | None = None, proxy_pass: str | None = None) -> tuple[dict | None, str | None]:
     """Construye configuracion de proxy para Playwright y httpx.
 
     Args:
         use_proxy: Indica si se debe construir configuracion de proxy.
-
+        proxy_server: URL del servidor proxy.
+        proxy_user: Usuario del proxy.
+        proxy_pass: Contraseña del proxy.
     Returns:
         Tupla con (proxy_settings, proxy_url). Ambos None si no se usa proxy.
 
@@ -38,14 +41,14 @@ def _build_proxy_settings(use_proxy: bool) -> tuple[dict | None, str | None]:
     """
     if not use_proxy:
         return None, None
-    if not PROXY_SERVER or not PROXY_USER or not PROXY_PASS:
+    if not proxy_server or not proxy_user or not proxy_pass:
         raise ValueError("Falta configurar PROXY_SERVER/PROXY_USER/PROXY_PASS")
     proxy_settings = {
-        "server": f"http://{PROXY_SERVER}",
-        "username": PROXY_USER,
-        "password": PROXY_PASS,
+        "server": f"http://{proxy_server}",
+        "username": proxy_user,
+        "password": proxy_pass,
     }
-    proxy_url = f"http://{PROXY_USER}:{PROXY_PASS}@{PROXY_SERVER}"
+    proxy_url = f"http://{proxy_user}:{proxy_pass}@{proxy_server}"
     return proxy_settings, proxy_url
 
 
@@ -259,3 +262,52 @@ async def parse_product(product: dict) -> dict:
         "GMT_CREATE": item.get("gmtCreate"),
         "SELLER_ID": seller.get("sellerId"),
     }
+
+
+async def scrape_one(
+    url: str,
+    cookie_mgr: CookieManager,
+    timeout_s: float,
+) -> dict:
+    """
+    Scrapea una URL con manejo de tokens.
+    Los retries de job-level los maneja SQS + DLQ.
+    """
+    last_ret = ""
+
+    for _ in range(MAX_TOKEN_RETRIES + 1):
+        cookies = await cookie_mgr.ensure(url)
+
+        try:
+            result = await asyncio.wait_for(
+                scrape_pdp(
+                    url,
+                    save_to_file=False,
+                    cookies=cookies,
+                    use_proxy=cookie_mgr.use_proxy,
+                ),
+                timeout=timeout_s,
+            )
+        except asyncio.TimeoutError:
+            raise RuntimeError("REQUEST_TIMEOUT")
+
+        ret = result.get("ret", [""])[0]
+        last_ret = ret
+
+        if ret and "SUCCESS" not in ret:
+            if any(err in ret for err in TOKEN_ERRORS):
+                await cookie_mgr.refresh(url)
+                continue
+
+            raise RuntimeError(ret)
+
+        parsed = await parse_product(result)
+        parsed["URL"] = url
+
+        if isinstance(parsed.get("IMAGES"), list):
+            parsed["IMAGES"] = json.dumps(parsed["IMAGES"], ensure_ascii=False)
+
+        return parsed
+
+    # Si agotamos retries de token → job falla
+    raise RuntimeError(last_ret or "TOKEN_RETRY_EXHAUSTED")

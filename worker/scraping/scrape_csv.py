@@ -8,8 +8,8 @@ from pathlib import Path
 if __package__ is None or __package__ == "":
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from utils.CookieManager import CookieManager
-from utils.scraping_repository import get_fresh_cookies, parse_product, scrape_pdp
+from worker.utils.CookieManager import CookieManager
+from worker.scraping.scraping_repository import get_fresh_cookies, parse_product, scrape_pdp
 
 TOKEN_ERRORS = ("FAIL_SYS_TOKEN", "TOKEN_EMPTY", "RGV587_ERROR")
 OUTPUT_FIELDS = [
@@ -112,86 +112,86 @@ def build_row(data: dict) -> dict:
     return row
 
 
-async def run(
-    input_path: Path,
-    output_path: Path,
-    workers: int,
-    retries: int,
-    use_proxy: bool,
-    timeout_s: float,
-) -> None:
-    """Orquesta el scraping concurrente por URLs y genera el CSV.
+# async def run(
+#     input_path: Path,
+#     output_path: Path,
+#     workers: int,
+#     retries: int,
+#     use_proxy: bool,
+#     timeout_s: float,
+# ) -> None:
+#     """Orquesta el scraping concurrente por URLs y genera el CSV.
 
-    Args:
-        input_path: Ruta del CSV de entrada.
-        output_path: Ruta del CSV de salida.
-        workers: Cantidad de workers en paralelo.
-        retries: Reintentos por URL si falla el token.
-        use_proxy: Indica si se usa proxy al obtener cookies.
-        timeout_s: Timeout maximo por URL.
-    """
-    urls = load_urls(input_path)
-    if not urls:
-        print("No se encontraron URLs en el CSV.")
-        return
+#     Args:
+#         input_path: Ruta del CSV de entrada.
+#         output_path: Ruta del CSV de salida.
+#         workers: Cantidad de workers en paralelo.
+#         retries: Reintentos por URL si falla el token.
+#         use_proxy: Indica si se usa proxy al obtener cookies.
+#         timeout_s: Timeout maximo por URL.
+#     """
+#     urls = load_urls(input_path)
+#     if not urls:
+#         print("No se encontraron URLs en el CSV.")
+#         return
 
-    if workers <= 0:
-        workers = 1
-    workers = min(workers, len(urls))
+#     if workers <= 0:
+#         workers = 1
+#     workers = min(workers, len(urls))
 
-    lock = asyncio.Lock()
-    visited_lock = asyncio.Lock()
-    visited: set[str] = set()
-    counter_lock = asyncio.Lock()
-    counter = {"value": 0}
+#     lock = asyncio.Lock()
+#     visited_lock = asyncio.Lock()
+#     visited: set[str] = set()
+#     counter_lock = asyncio.Lock()
+#     counter = {"value": 0}
 
-    queue: asyncio.Queue[str] = asyncio.Queue()
-    for url in urls:
-        queue.put_nowait(url)
+#     queue: asyncio.Queue[str] = asyncio.Queue()
+#     for url in urls:
+#         queue.put_nowait(url)
 
-    async def worker() -> None:
-        cookie_mgr = CookieManager(get_fresh_cookies, use_proxy=use_proxy)
-        while True:
-            try:
-                url = queue.get_nowait()
-            except asyncio.QueueEmpty:
-                return
-            async with visited_lock:
-                if url in visited:
-                    data = {"URL": url, "ERROR": "DUPLICATE_URL"}
-                    row = build_row(data)
-                    async with lock:
-                        writer.writerow(row)
-                        output_file.flush()
-                    async with counter_lock:
-                        counter["value"] += 1
-                        current = counter["value"]
-                    print(f"[{current}/{len(urls)}] SKIP - {url} (duplicate)")
-                    queue.task_done()
-                    continue
-                visited.add(url)
-            try:
-                data = await scrape_one(url, cookie_mgr, retries, timeout_s)
-            except Exception as exc:
-                data = {"URL": url, "ERROR": f"EXCEPTION::{exc.__class__.__name__}"}
-            row = build_row(data)
-            async with lock:
-                writer.writerow(row)
-                output_file.flush()
-            async with counter_lock:
-                counter["value"] += 1
-                current = counter["value"]
-            status = "ERROR" if data.get("ERROR") else "OK"
-            print(f"[{current}/{len(urls)}] {status} - {data.get('URL')}")
-            queue.task_done()
+#     async def worker() -> None:
+#         cookie_mgr = CookieManager(get_fresh_cookies, use_proxy=use_proxy)
+#         while True:
+#             try:
+#                 url = queue.get_nowait()
+#             except asyncio.QueueEmpty:
+#                 return
+#             async with visited_lock:
+#                 if url in visited:
+#                     data = {"URL": url, "ERROR": "DUPLICATE_URL"}
+#                     row = build_row(data)
+#                     async with lock:
+#                         writer.writerow(row)
+#                         output_file.flush()
+#                     async with counter_lock:
+#                         counter["value"] += 1
+#                         current = counter["value"]
+#                     print(f"[{current}/{len(urls)}] SKIP - {url} (duplicate)")
+#                     queue.task_done()
+#                     continue
+#                 visited.add(url)
+#             try:
+#                 data = await scrape_one(url, cookie_mgr, retries, timeout_s)
+#             except Exception as exc:
+#                 data = {"URL": url, "ERROR": f"EXCEPTION::{exc.__class__.__name__}"}
+#             row = build_row(data)
+#             async with lock:
+#                 writer.writerow(row)
+#                 output_file.flush()
+#             async with counter_lock:
+#                 counter["value"] += 1
+#                 current = counter["value"]
+#             status = "ERROR" if data.get("ERROR") else "OK"
+#             print(f"[{current}/{len(urls)}] {status} - {data.get('URL')}")
+#             queue.task_done()
 
-    with output_path.open("w", encoding="utf-8", newline="") as output_file:
-        writer = csv.DictWriter(output_file, fieldnames=OUTPUT_FIELDS)
-        writer.writeheader()
-        tasks = [asyncio.create_task(worker()) for _ in range(workers)]
-        await asyncio.gather(*tasks)
+#     with output_path.open("w", encoding="utf-8", newline="") as output_file:
+#         writer = csv.DictWriter(output_file, fieldnames=OUTPUT_FIELDS)
+#         writer.writeheader()
+#         tasks = [asyncio.create_task(worker()) for _ in range(workers)]
+#         await asyncio.gather(*tasks)
 
-    print(f"CSV generado en: {output_path}")
+#     print(f"CSV generado en: {output_path}")
 
 
 if __name__ == "__main__":
