@@ -116,6 +116,26 @@ URL
 https://www.goofish.com/item?id=894551126004
 ```
 
+## Exportar DynamoDB a CSV
+
+Puedes exportar los items de DynamoDB a CSV usando `utils/dynamodb_to_csv.py`.
+
+```bash
+python utils/dynamodb_to_csv.py \
+  --table "$GOOFISH_PARSED_URLS_TABLE" \
+  --region "$AWS_REGION" \
+  --output data/goofish_products_scraped.csv
+```
+
+Opcionalmente, puedes limitar columnas con `--fields` (separadas por coma):
+
+```bash
+python utils/dynamodb_to_csv.py \
+  --table "$GOOFISH_PARSED_URLS_TABLE" \
+  --output /tmp/goofish.csv \
+  --fields "id,title,price,url,created_at"
+```
+
 ## Notas
 
 - La idempotencia se maneja en DynamoDB usando `url_hash`.

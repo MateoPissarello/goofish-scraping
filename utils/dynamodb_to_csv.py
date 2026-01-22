@@ -4,10 +4,14 @@ import argparse
 import csv
 import json
 import os
+import logging
 from decimal import Decimal
 from typing import Any
 
 import boto3
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def _json_fallback(value: Any) -> Any:
@@ -49,10 +53,12 @@ def scan_table(table_name: str, region: str | None = None) -> list[dict]:
     items: list[dict] = []
     scan_kwargs: dict[str, Any] = {}
 
+    logger.info("Iniciando scan de tabla %s", table_name)
     while True:
         response = table.scan(**scan_kwargs)
         batch = response.get("Items", [])
         items.extend(_normalize_item(item) for item in batch)
+        logger.info("Items acumulados: %s", len(items))
         last_key = response.get("LastEvaluatedKey")
         if not last_key:
             break
@@ -73,6 +79,7 @@ def write_csv(items: list[dict], output_path: str, fields: list[str] | None = No
         None
     """
     if not items:
+        logger.info("No hay items para exportar. Generando CSV vacío en %s", output_path)
         with open(output_path, "w", encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
             writer.writerow(fields or [])
@@ -84,6 +91,7 @@ def write_csv(items: list[dict], output_path: str, fields: list[str] | None = No
             field_set.update(item.keys())
         fields = sorted(field_set)
 
+    logger.info("Escribiendo %s items en %s", len(items), output_path)
     with open(output_path, "w", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
         writer.writeheader()
@@ -125,7 +133,7 @@ def main() -> None:
 
     items = scan_table(args.table, args.region)
     write_csv(items, args.output, fields)
-    print(f"Exportados {len(items)} items a {args.output}")
+    logger.info("Exportados %s items a %s", len(items), args.output)
 
 
 if __name__ == "__main__":
