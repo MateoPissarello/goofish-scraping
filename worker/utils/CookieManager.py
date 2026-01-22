@@ -1,4 +1,4 @@
-"""Gestor de cookies con refresh y cache temporal."""
+"""Gestor de cookies con refresh y caché temporal."""
 
 import asyncio
 import logging
@@ -11,6 +11,8 @@ MAX_COOKIE_AGE = 600  # 10 minutos
 
 
 class CookieManager:
+    """Cachea cookies y las refresca automáticamente por expiración."""
+
     def __init__(
         self,
         fetch_cookies: Callable[[str, bool], Awaitable[dict]],
@@ -28,7 +30,14 @@ class CookieManager:
         self._lock = asyncio.Lock()
 
     async def ensure(self, url: str) -> dict:
-        """Devuelve cookies válidas, refrescando si es necesario."""
+        """Devuelve cookies válidas, refrescando si es necesario.
+
+        Args:
+            url (str): URL objetivo para obtener cookies.
+
+        Returns:
+            dict: Cookies válidas para el dominio objetivo.
+        """
         if (
             self._cookies is None
             or time.time() - self._cookies["fetched_at"] > MAX_COOKIE_AGE
@@ -46,7 +55,14 @@ class CookieManager:
         return self._cookies["value"]
 
     async def refresh(self, url: str) -> dict:
-        """Fuerza refresh de cookies, ignorando el cache."""
+        """Fuerza refresh de cookies, ignorando el caché.
+
+        Args:
+            url (str): URL objetivo para obtener cookies.
+
+        Returns:
+            dict: Cookies nuevas para el dominio objetivo.
+        """
         async with self._lock:
             logger.info("Refrescando cookies...")
             cookies = await self._fetch_cookies(url, use_proxy=self.use_proxy)

@@ -32,9 +32,10 @@ def _build_proxy_settings(use_proxy: bool) -> tuple[dict | None, str | None]:
     """Construye configuración de proxy para Playwright y httpx.
 
     Args:
-        use_proxy: Indica si se debe construir configuracion de proxy.
+        use_proxy (bool): Indica si se debe construir configuración de proxy.
+
     Returns:
-        Tupla con (proxy_settings, proxy_url). Ambos None si no se usa proxy.
+        tuple[dict | None, str | None]: (proxy_settings, proxy_url). Ambos None si no se usa proxy.
 
     Raises:
         ValueError: Si faltan variables de entorno del proxy.
@@ -60,11 +61,11 @@ async def get_fresh_cookies(target_url: str, use_proxy: bool = False) -> dict:
     """Abre un navegador stealth y devuelve cookies útiles para Goofish.
 
     Args:
-        target_url: URL que se visita para generar cookies.
-        use_proxy: Indica si se usa proxy en el navegador.
+        target_url (str): URL que se visita para generar cookies.
+        use_proxy (bool): Indica si se usa proxy en el navegador.
 
     Returns:
-        Diccionario de cookies obtenidas desde el navegador.
+        dict: Cookies obtenidas desde el navegador.
     """
     logger.info("Obteniendo cookies frescas con Playwright...")
     proxy_settings, _ = _build_proxy_settings(use_proxy)
@@ -103,13 +104,13 @@ def extract_item_id(url: str) -> str:
     """Extrae el item_id desde el querystring de la URL.
 
     Args:
-        url: URL del producto de Goofish.
+        url (str): URL del producto de Goofish.
 
     Returns:
-        Valor del parametro "id".
+        str: Valor del parámetro "id".
 
     Raises:
-        ValueError: Si la URL no contiene el parametro "id".
+        ValueError: Si la URL no contiene el parámetro "id".
     """
     parsed = urlparse(url)
     qs = parse_qs(parsed.query)
@@ -122,12 +123,12 @@ def generate_sign(token: str, timestamp: str, data: str) -> str:
     """Genera la firma MD5 requerida por el endpoint mtop.
 
     Args:
-        token: Token de cookies (_m_h5_tk) para firmar.
-        timestamp: Timestamp en milisegundos.
-        data: JSON serializado que se envia al endpoint.
+        token (str): Token de cookies (_m_h5_tk) para firmar.
+        timestamp (str): Timestamp en milisegundos.
+        data (str): JSON serializado que se envía al endpoint.
 
     Returns:
-        Hash MD5 con la firma requerida por el API.
+        str: Hash MD5 con la firma requerida por el API.
     """
     token_val = token.split("_")[0] if token else ""
     raw = f"{token_val}&{timestamp}&{APP_KEY}&{data}"
@@ -143,13 +144,13 @@ async def scrape_pdp(
     """Consulta el endpoint de detalle y devuelve el JSON de producto.
 
     Args:
-        url: URL del producto de Goofish.
-        save_to_file: Indica si se guarda la respuesta en un archivo local.
-        cookies: Cookies a reutilizar en la peticion.
-        use_proxy: Indica si se usa proxy en la peticion HTTP.
+        url (str): URL del producto de Goofish.
+        save_to_file (bool): Indica si se guarda la respuesta en un archivo local.
+        cookies (dict | None): Cookies a reutilizar en la petición.
+        use_proxy (bool): Indica si se usa proxy en la petición HTTP.
 
     Returns:
-        Diccionario con el JSON de respuesta del endpoint.
+        dict: JSON de respuesta del endpoint.
     """
     if cookies is None:
         logger.warning("No se proporcionaron cookies, obteniendo cookies frescas...")
@@ -243,10 +244,10 @@ async def parse_product(product: dict) -> dict:
     """Normaliza el payload de Goofish a un esquema plano.
 
     Args:
-        product: Respuesta cruda del endpoint de detalle.
+        product (dict): Respuesta cruda del endpoint de detalle.
 
     Returns:
-        Diccionario con campos normalizados del producto.
+        dict: Campos normalizados del producto.
     """
     data = product.get("data", {})
     track = data.get("trackParams", {})
@@ -273,9 +274,20 @@ async def scrape_one(
     cookie_mgr: CookieManager,
     timeout_s: float,
 ) -> dict:
-    """
-    Scrapea una URL con manejo de tokens.
+    """Scrapea una URL con manejo de tokens.
+
     Los retries a nivel job los maneja SQS + DLQ.
+
+    Args:
+        url (str): URL del producto.
+        cookie_mgr (CookieManager): Gestor de cookies.
+        timeout_s (float): Timeout máximo por request.
+
+    Returns:
+        dict: Datos normalizados del producto.
+
+    Raises:
+        RuntimeError: Si falla el scraping o expiran los tokens.
     """
     last_ret = ""
 

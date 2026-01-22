@@ -1,4 +1,7 @@
-"""Lambda que envía URLs desde un CSV en S3 hacia SQS."""
+"""Lambda que envía URLs desde un CSV en S3 hacia SQS.
+
+El CSV debe tener una columna llamada "URL".
+"""
 
 import json
 import csv
@@ -16,8 +19,11 @@ def handler(event, context):
     """Handler de Lambda para eventos S3 ObjectCreated.
 
     Args:
-        event: Evento de S3 con registros de objetos creados.
-        context: Contexto Lambda (no usado).
+        event (dict): Evento de S3 con registros de objetos creados.
+        context (object): Contexto Lambda (no usado).
+
+    Returns:
+        None
     """
     for record in event["Records"]:
         bucket = record["s3"]["bucket"]["name"]

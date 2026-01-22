@@ -1,4 +1,7 @@
-"""API HTTP para exponer el scraping de un PDP de Goofish."""
+"""API HTTP para exponer el scraping de un PDP de Goofish.
+
+Esta API se usa principalmente para pruebas locales del scraping por URL.
+"""
 
 from fastapi.responses import RedirectResponse
 from fastapi.openapi.utils import get_openapi
@@ -14,10 +17,10 @@ YOUR_NAME = "Mateo Pissarello"  # TODO: actualiza con tu nombre si corresponde.
 
 
 def custom_openapi():
-    """Personaliza el schema OpenAPI y elimina respuestas de validación.
+    """Personaliza el esquema OpenAPI y elimina respuestas de validación.
 
     Returns:
-        Diccionario OpenAPI modificado.
+        dict: Esquema OpenAPI modificado.
     """
     if app.openapi_schema:
         return app.openapi_schema
@@ -60,7 +63,7 @@ async def redirect_to_docs():
     """Redirige al usuario hacia la documentación interactiva.
 
     Returns:
-        Ruta de redireccion a la documentacion.
+        str: Ruta de redirección a la documentación.
     """
     return "/docs"
 
@@ -70,10 +73,10 @@ async def scrape_pdp_endpoint(url: str = Query(..., description="The URL of the 
     """Expone el scraper como endpoint HTTP.
 
     Args:
-        url: URL del producto a hacer scraping.
+        url (str): URL del producto a hacer scraping.
 
     Returns:
-        Diccionario con datos normalizados o un error.
+        dict: Datos normalizados del producto o un diccionario de error.
     """
     try:
         cookie_mgr = CookieManager(get_fresh_cookies, use_proxy=False)

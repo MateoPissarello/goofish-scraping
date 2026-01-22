@@ -10,11 +10,11 @@ def count_scraped(csv_path: Path, error_field: str) -> tuple[int, int]:
     """Cuenta cuántas filas están OK y cuántas tienen error.
 
     Args:
-        csv_path: Ruta al CSV de salida del scraping.
-        error_field: Columna que indica error.
+        csv_path (Path): Ruta al CSV de salida del scraping.
+        error_field (str): Columna que indica error.
 
     Returns:
-        (total, ok)
+        tuple[int, int]: (total, ok).
     """
     df = pd.read_csv(csv_path)
     total = len(df)

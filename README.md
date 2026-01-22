@@ -2,6 +2,9 @@
 
 Pipeline de scraping asíncrona para extraer datos de productos de Goofish a partir de URLs y procesarlos en AWS con S3 → Lambda → SQS → ECS Fargate. Incluye un endpoint HTTP opcional para pruebas locales.
 
+![Arquitectura](images/scrapping_update.drawio.png)
+_Diagrama de alto nivel del flujo S3 → Lambda → SQS → ECS Fargate → DynamoDB._
+
 ## Arquitectura
 
 1) **Carga de URLs**: se sube un CSV a S3 (columna `URL`).

@@ -1,4 +1,10 @@
-"""Worker ECS: consume URLs desde SQS, scrapea y persiste en DynamoDB."""
+"""Worker ECS: consume URLs desde SQS, scrapea y persiste en DynamoDB.
+
+Flujo:
+1) Recibe mensajes de SQS con URLs.
+2) Ejecuta scraping del PDP.
+3) Guarda estado e ítems en DynamoDB.
+"""
 
 import os
 import json
@@ -38,7 +44,11 @@ shutdown_event = asyncio.Event()
 
 
 def handle_shutdown():
-    """Marca el evento de apagado para salir del loop principal limpiamente."""
+    """Marca el evento de apagado para salir del loop principal limpiamente.
+
+    Returns:
+        None
+    """
     logging.info("SIGTERM/SIGINT recibido. Iniciando shutdown limpio...")
     shutdown_event.set()
 
@@ -47,18 +57,38 @@ def handle_shutdown():
 # Helpers
 # -------------------------
 def url_hash(url: str) -> str:
-    """Genera un hash estable para usar como PK en DynamoDB."""
+    """Genera un hash estable para usar como PK en DynamoDB.
+
+    Args:
+        url (str): URL completa del producto.
+
+    Returns:
+        str: Hash MD5 en hexadecimal.
+    """
     return md5(url.encode("utf-8")).hexdigest()
 
 
 def get_job_status(url_hash_value: str):
-    """Obtiene el estado de una URL previamente procesada."""
+    """Obtiene el estado de una URL previamente procesada.
+
+    Args:
+        url_hash_value (str): Hash de la URL.
+
+    Returns:
+        dict | None: Item de DynamoDB si existe, en caso contrario None.
+    """
     resp = scraped_table.get_item(Key={"url_hash": url_hash_value})
     return resp.get("Item")
 
 
 def mark_job(url: str, status: str, error: str | None = None):
-    """Crea o actualiza el estado de scraping de una URL."""
+    """Crea o actualiza el estado de scraping de una URL.
+
+    Args:
+        url (str): URL del producto.
+        status (str): Estado de scraping (IN_PROGRESS, SUCCESS, FAILED).
+        error (str | None): Mensaje de error si aplica.
+    """
     item = {
         "url_hash": url_hash(url),
         "url": url,
@@ -71,7 +101,11 @@ def mark_job(url: str, status: str, error: str | None = None):
 
 
 def save_data(item: dict):
-    """Guarda el ítem parseado en la tabla de resultados."""
+    """Guarda el ítem parseado en la tabla de resultados.
+
+    Args:
+        item (dict): Item normalizado para persistir.
+    """
     parsed_table.put_item(Item=item)
 
 
@@ -79,7 +113,16 @@ def save_data(item: dict):
 # Message handler
 # -------------------------
 async def handle_message(msg, scraper, semaphore):
-    """Procesa un mensaje SQS con control de concurrencia."""
+    """Procesa un mensaje SQS con control de concurrencia.
+
+    Args:
+        msg (dict): Mensaje recibido desde SQS.
+        scraper (PdpScrapper): Instancia de scraper con cookies compartidas.
+        semaphore (asyncio.Semaphore): Semáforo para limitar concurrencia.
+
+    Returns:
+        None
+    """
     async with semaphore:
         receipt = msg["ReceiptHandle"]
         body = json.loads(msg["Body"])
@@ -126,7 +169,11 @@ async def handle_message(msg, scraper, semaphore):
 # Main loop
 # -------------------------
 async def main():
-    """Loop principal: long polling en SQS y procesamiento concurrente."""
+    """Loop principal: long polling en SQS y procesamiento concurrente.
+
+    Returns:
+        None
+    """
     idle_time = 0
     loop = asyncio.get_running_loop()
 
