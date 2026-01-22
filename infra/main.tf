@@ -434,29 +434,30 @@ resource "aws_appautoscaling_policy" "scale_out" {
 
   step_scaling_policy_configuration {
     adjustment_type         = "ChangeInCapacity"
-    cooldown                = 60
+    cooldown                = 30
     metric_aggregation_type = "Average"
 
     # (métrica - threshold) entra en estos rangos
 
     # 10-50 msgs => +1
+    # 10–100 msgs → +5
     step_adjustment {
       metric_interval_lower_bound = 0
-      metric_interval_upper_bound = 40
-      scaling_adjustment          = 1
-    }
-
-    # 50-200 msgs => +5
-    step_adjustment {
-      metric_interval_lower_bound = 40
-      metric_interval_upper_bound = 190
+      metric_interval_upper_bound = 90
       scaling_adjustment          = 5
     }
 
-    # 200+ msgs => +10
+    # 100–500 msgs → +10
     step_adjustment {
-      metric_interval_lower_bound = 190
+      metric_interval_lower_bound = 90
+      metric_interval_upper_bound = 490
       scaling_adjustment          = 10
+    }
+
+    # 500+ msgs → +20
+    step_adjustment {
+      metric_interval_lower_bound = 490
+      scaling_adjustment          = 20
     }
 
 

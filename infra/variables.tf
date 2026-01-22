@@ -26,7 +26,7 @@ variable "min_capacity" {
 
 variable "max_capacity" {
   type    = number
-  default = 20
+  default = 80
 }
 
 # Umbral “simple” para escalar: si hay más de X mensajes visibles, escala.
@@ -49,12 +49,12 @@ variable "sqs_visibility_timeout_seconds" {
 
 variable "worker_cpu" {
   type    = number
-  default = 512
+  default = 1024
 }
 
 variable "worker_memory" {
   type    = number
-  default = 1024
+  default = 2048
 }
 
 variable "messages_per_task" {

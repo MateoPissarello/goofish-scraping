@@ -16,6 +16,8 @@ REGION_NAME = os.getenv("AWS_REGION", "us-east-1")
 SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")
 GOOFISH_SCRAPED_URLS_TABLE = os.getenv("GOOFISH_SCRAPED_URLS_TABLE")
 GOOFISH_PARSED_URLS_TABLE = os.getenv("GOOFISH_PARSED_URLS_TABLE")
+IDLE_LIMIT = 60
+
 
 logging.basicConfig(level=logging.INFO)
 
@@ -74,6 +76,7 @@ async def process_url(url: str):
 # Main loop
 # -------------------------
 async def main():
+    idle_time = 0
     loop = asyncio.get_running_loop()
 
     # Registrar handlers de señal
@@ -83,7 +86,8 @@ async def main():
     logging.info("Worker iniciado, esperando mensajes...")
 
     while not shutdown_event.is_set():
-        resp = sqs.receive_message(
+        resp = await asyncio.to_thread(
+            sqs.receive_message,
             QueueUrl=SQS_QUEUE_URL,
             MaxNumberOfMessages=1,
             WaitTimeSeconds=20,
@@ -93,6 +97,11 @@ async def main():
         if not messages:
             if shutdown_event.is_set():
                 break
+            await asyncio.sleep(5)
+            idle_time += 5
+            if idle_time >= IDLE_LIMIT:
+                logging.info("Límite de inactividad alcanzado, apagando worker.")
+                break
             continue
 
         msg = messages[0]
@@ -101,7 +110,7 @@ async def main():
         body = json.loads(msg["Body"])
         product_url = body["url"]
         logging.info("Procesando URL: %s", product_url)
-
+        idle_time = 0
         h = url_hash(product_url)
         status = get_job_status(h)
 
@@ -132,7 +141,7 @@ async def main():
         except Exception as e:
             logging.exception("Error procesando URL %s", product_url)
             mark_job(product_url, "FAILED", str(e))
-            # ❌ No borrar mensaje → SQS retry / DLQ
+            #  No borrar mensaje → SQS retry / DLQ
 
     logging.info("Worker apagado limpiamente.")
 
