@@ -474,7 +474,8 @@ resource "aws_cloudwatch_metric_alarm" "scale_in" {
   period              = 60
   statistic           = "Average"
   threshold           = 5
-  treat_missing_data  = "breaching"
+
+  treat_missing_data = "notBreaching"
 
   dimensions = {
     QueueName = aws_sqs_queue.main.name
@@ -482,6 +483,7 @@ resource "aws_cloudwatch_metric_alarm" "scale_in" {
 
   alarm_actions = [aws_appautoscaling_policy.scale_in.arn]
 }
+
 
 resource "aws_appautoscaling_policy" "scale_in" {
   name               = "${var.project_name}-scale-in-policy"
