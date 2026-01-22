@@ -39,7 +39,6 @@ Pipeline de scraping asincrónica para extraer datos de productos de Goofish a p
 - `GOOFISH_PARSED_URLS_TABLE`
 - `PROXY_SERVER`, `PROXY_USER`, `PROXY_PASS` (requeridas si `use_proxy=True`)
 
-> Nota: en `PdpScraper`, el `CookieManager` usa proxy por defecto (`use_proxy=True`). Si corrés el worker localmente, definí estas variables o ajustá el código.
 
 ### Variables de entorno (API local)
 
