@@ -16,8 +16,10 @@ REGION_NAME = os.getenv("AWS_REGION", "us-east-1")
 SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")
 GOOFISH_SCRAPED_URLS_TABLE = os.getenv("GOOFISH_SCRAPED_URLS_TABLE")
 GOOFISH_PARSED_URLS_TABLE = os.getenv("GOOFISH_PARSED_URLS_TABLE")
-IDLE_LIMIT = 60
 
+IDLE_LIMIT = 60  # segundos sin mensajes antes de apagar
+MAX_CONCURRENCY = 3  # URLs en paralelo por task ECS
+MAX_BATCH_SIZE = 10  # mensajes por poll SQS
 
 logging.basicConfig(level=logging.INFO)
 
@@ -59,7 +61,6 @@ def mark_job(url: str, status: str, error: str | None = None):
     }
     if error:
         item["error"] = error
-
     scraped_table.put_item(Item=item)
 
 
@@ -67,9 +68,47 @@ def save_data(item: dict):
     parsed_table.put_item(Item=item)
 
 
-async def process_url(url: str):
-    scraper = PdpScrapper()
-    return await scraper.scrape(url)
+# -------------------------
+# Message handler
+# -------------------------
+async def handle_message(msg, scraper, semaphore):
+    async with semaphore:
+        receipt = msg["ReceiptHandle"]
+        body = json.loads(msg["Body"])
+        product_url = body["url"]
+
+        logging.info("Procesando URL: %s", product_url)
+
+        h = url_hash(product_url)
+        status = get_job_status(h)
+
+        # Idempotencia
+        if status and status.get("status") == "SUCCESS":
+            sqs.delete_message(
+                QueueUrl=SQS_QUEUE_URL,
+                ReceiptHandle=receipt,
+            )
+            logging.info("URL ya procesada: %s", product_url)
+            return
+
+        try:
+            mark_job(product_url, "IN_PROGRESS")
+
+            data = await scraper.scrape(product_url)
+
+            save_data(data)
+            mark_job(product_url, "SUCCESS")
+
+            sqs.delete_message(
+                QueueUrl=SQS_QUEUE_URL,
+                ReceiptHandle=receipt,
+            )
+
+            logging.info("URL procesada OK: %s", product_url)
+
+        except Exception as e:
+            logging.exception("Error procesando URL %s", product_url)
+            mark_job(product_url, "FAILED", str(e))
 
 
 # -------------------------
@@ -79,7 +118,6 @@ async def main():
     idle_time = 0
     loop = asyncio.get_running_loop()
 
-    # Registrar handlers de señal
     loop.add_signal_handler(signal.SIGTERM, handle_shutdown)
     loop.add_signal_handler(signal.SIGINT, handle_shutdown)
 
@@ -89,59 +127,30 @@ async def main():
         resp = await asyncio.to_thread(
             sqs.receive_message,
             QueueUrl=SQS_QUEUE_URL,
-            MaxNumberOfMessages=1,
+            MaxNumberOfMessages=MAX_BATCH_SIZE,
             WaitTimeSeconds=20,
         )
 
         messages = resp.get("Messages", [])
+
         if not messages:
-            if shutdown_event.is_set():
-                break
             await asyncio.sleep(5)
             idle_time += 5
+
             if idle_time >= IDLE_LIMIT:
                 logging.info("Límite de inactividad alcanzado, apagando worker.")
                 break
+
             continue
 
-        msg = messages[0]
-        receipt = msg["ReceiptHandle"]
-
-        body = json.loads(msg["Body"])
-        product_url = body["url"]
-        logging.info("Procesando URL: %s", product_url)
         idle_time = 0
-        h = url_hash(product_url)
-        status = get_job_status(h)
 
-        if status and status.get("status") == "SUCCESS":
-            sqs.delete_message(
-                QueueUrl=SQS_QUEUE_URL,
-                ReceiptHandle=receipt,
-            )
-            logging.info("URL ya procesada exitosamente: %s", product_url)
-            continue
+        scraper = PdpScrapper()
+        semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
 
-        try:
-            mark_job(product_url, "IN_PROGRESS")
+        tasks = [handle_message(msg, scraper, semaphore) for msg in messages]
 
-            data = await process_url(product_url)
-
-            logging.info("Datos scrapeados: %s", data)
-            save_data(data)
-
-            mark_job(product_url, "SUCCESS")
-            logging.info("URL procesada exitosamente: %s", product_url)
-
-            sqs.delete_message(
-                QueueUrl=SQS_QUEUE_URL,
-                ReceiptHandle=receipt,
-            )
-
-        except Exception as e:
-            logging.exception("Error procesando URL %s", product_url)
-            mark_job(product_url, "FAILED", str(e))
-            #  No borrar mensaje → SQS retry / DLQ
+        await asyncio.gather(*tasks)
 
     logging.info("Worker apagado limpiamente.")
 
