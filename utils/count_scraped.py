@@ -1,3 +1,5 @@
+"""Utilidad para contar filas OK/ERROR en un CSV de scraping."""
+
 import argparse
 from pathlib import Path
 
@@ -5,6 +7,15 @@ import pandas as pd
 
 
 def count_scraped(csv_path: Path, error_field: str) -> tuple[int, int]:
+    """Cuenta cuántas filas están OK y cuántas tienen error.
+
+    Args:
+        csv_path: Ruta al CSV de salida del scraping.
+        error_field: Columna que indica error.
+
+    Returns:
+        (total, ok)
+    """
     df = pd.read_csv(csv_path)
     total = len(df)
     ok_mask = df[error_field].isna() | (df[error_field].astype(str).str.strip() == "")
@@ -13,6 +24,7 @@ def count_scraped(csv_path: Path, error_field: str) -> tuple[int, int]:
 
 
 def main() -> None:
+    """CLI para reportar conteos de scraping."""
     parser = argparse.ArgumentParser(
         description="Cuenta cuantas filas fueron scrapeadas sin error.",
     )

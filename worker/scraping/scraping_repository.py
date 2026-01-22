@@ -1,3 +1,5 @@
+"""Repositorio de scraping: cookies, firma y request al endpoint de Goofish."""
+
 import json
 import logging
 import time
@@ -27,13 +29,10 @@ logger = logging.getLogger(__name__)
 
 
 def _build_proxy_settings(use_proxy: bool) -> tuple[dict | None, str | None]:
-    """Construye configuracion de proxy para Playwright y httpx.
+    """Construye configuración de proxy para Playwright y httpx.
 
     Args:
         use_proxy: Indica si se debe construir configuracion de proxy.
-        proxy_server: URL del servidor proxy.
-        proxy_user: Usuario del proxy.
-        proxy_pass: Contraseña del proxy.
     Returns:
         Tupla con (proxy_settings, proxy_url). Ambos None si no se usa proxy.
 
@@ -58,7 +57,7 @@ def _build_proxy_settings(use_proxy: bool) -> tuple[dict | None, str | None]:
 
 
 async def get_fresh_cookies(target_url: str, use_proxy: bool = False) -> dict:
-    """Abre un navegador stealth y devuelve cookies utiles para Goofish.
+    """Abre un navegador stealth y devuelve cookies útiles para Goofish.
 
     Args:
         target_url: URL que se visita para generar cookies.
@@ -276,7 +275,7 @@ async def scrape_one(
 ) -> dict:
     """
     Scrapea una URL con manejo de tokens.
-    Los retries de job-level los maneja SQS + DLQ.
+    Los retries a nivel job los maneja SQS + DLQ.
     """
     last_ret = ""
 

@@ -1,21 +1,21 @@
 # Goofish Scraper (Iceberg Data)
 
-Pipeline de scraping asincrónica para extraer datos de productos de Goofish a partir de URLs y procesarlos en AWS con S3 → Lambda → SQS → ECS Fargate. Incluye un endpoint HTTP opcional para pruebas locales.
+Pipeline de scraping asíncrona para extraer datos de productos de Goofish a partir de URLs y procesarlos en AWS con S3 → Lambda → SQS → ECS Fargate. Incluye un endpoint HTTP opcional para pruebas locales.
 
 ## Arquitectura
 
 1) **Carga de URLs**: se sube un CSV a S3 (columna `URL`).
 2) **Lambda (S3→SQS)**: al detectar el CSV, envía las URLs a SQS en batches de 10.
-3) **Workers (ECS Fargate)**: consumen mensajes de SQS, scrapean el PDP y guardan resultados en DynamoDB.
+3) **Workers (ECS Fargate)**: consumen mensajes de SQS, hacen scraping del PDP y guardan resultados en DynamoDB.
 4) **DynamoDB**:
    - `*-scraped-urls`: idempotencia y status por URL.
-   - `*-parsed-items`: items parseados.
+   - `*-parsed-items`: ítems parseados.
 5) **Autoscaling**: escala por cantidad de mensajes visibles en SQS.
 
 ## Componentes
 
 - `worker/worker.py`: loop principal del worker (SQS → scrape → DynamoDB).
-- `worker/scraping/scraping_repository.py`: lógica de cookies, firma y request a endpoint interno.
+- `worker/scraping/scraping_repository.py`: lógica de cookies, firma y request al endpoint interno.
 - `worker/scraping/PdpScraper.py`: wrapper de scraping por URL.
 - `lambda/s3_to_sqs.py`: Lambda que lee CSV desde S3 y publica en SQS.
 - `infra/`: Terraform para S3, SQS, DynamoDB, ECS, IAM, CloudWatch y Secrets Manager.
@@ -25,7 +25,7 @@ Pipeline de scraping asincrónica para extraer datos de productos de Goofish a p
 
 - Python 3.11+
 - Playwright + Chromium
-- AWS account con permisos para crear los recursos
+- Cuenta de AWS con permisos para crear los recursos
 - Terraform >= 1.5
 - Docker (para construir la imagen del worker)
 
@@ -44,7 +44,7 @@ Pipeline de scraping asincrónica para extraer datos de productos de Goofish a p
 
 Para la API de `main.py` no se usa proxy por defecto (`use_proxy=False`).
 
-Opcionalmente podés definir un `.env` con credenciales de proxy si querés probar con proxy.
+Opcionalmente puedes definir un `.env` con credenciales de proxy si quieres probar con proxy.
 
 ## Uso local
 
@@ -88,7 +88,7 @@ terraform apply \
 
 Outputs relevantes:
 
-- `datasets_bucket_name` (subir CSVs aquí)
+- `datasets_bucket_name` (sube CSVs aquí)
 - `sqs_queue_url`
 - `ecs_service_name`
 - `log_group_name`
@@ -102,7 +102,7 @@ docker build -t iceberg-scraper-worker .
 
 ## Ingesta de URLs
 
-1) Subí un CSV a S3 con columna `URL`.
+1) Sube un CSV a S3 con columna `URL`.
 2) La Lambda enviará las URLs a SQS.
 3) Los workers procesan y guardan resultados en DynamoDB.
 

@@ -1,3 +1,5 @@
+"""API HTTP para exponer el scraping de un PDP de Goofish."""
+
 from fastapi.responses import RedirectResponse
 from fastapi.openapi.utils import get_openapi
 from fastapi import FastAPI, Query
@@ -6,13 +8,13 @@ from worker.scraping.scrape_csv import scrape_one, get_fresh_cookies
 
 
 # =================================================================
-# FAST API CONFIGURATION
+# FASTAPI CONFIGURATION
 # =================================================================
-YOUR_NAME = "Mateo Pissarello"  # TODO: UPDATE WITH YOUR NAME
+YOUR_NAME = "Mateo Pissarello"  # TODO: actualiza con tu nombre si corresponde.
 
 
 def custom_openapi():
-    """Personaliza el schema OpenAPI para limpiar respuestas de validacion.
+    """Personaliza el schema OpenAPI y elimina respuestas de validación.
 
     Returns:
         Diccionario OpenAPI modificado.
@@ -22,7 +24,10 @@ def custom_openapi():
     openapi_schema = get_openapi(
         title=f"Goofish Scraping API - Developed by {YOUR_NAME}",
         version="1.0.0",
-        description="Technical Assesment Test for the position of Backend Engineer at Iceberg Data. This API is used to scrape the Goofish website and extract product information.",
+        description=(
+            "Prueba técnica para Backend Engineer en Iceberg Data. "
+            "Esta API expone el scraping de Goofish y devuelve datos de producto."
+        ),
         routes=app.routes,
     )
 
@@ -52,7 +57,7 @@ app.openapi = custom_openapi
 # Redirect to the documentation
 @app.get("/", include_in_schema=False, response_class=RedirectResponse, tags=["Root"])
 async def redirect_to_docs():
-    """Redirige al usuario hacia la documentacion interactiva.
+    """Redirige al usuario hacia la documentación interactiva.
 
     Returns:
         Ruta de redireccion a la documentacion.
@@ -60,16 +65,15 @@ async def redirect_to_docs():
     return "/docs"
 
 
-# Scraping function
 @app.get("/scrapePDP", tags=["Scraping"])
 async def scrape_pdp_endpoint(url: str = Query(..., description="The URL of the Goofish product to scrape")):
     """Expone el scraper como endpoint HTTP.
 
     Args:
-        url: URL del producto a scrapear.
+        url: URL del producto a hacer scraping.
 
     Returns:
-        Respuesta JSON del endpoint de detalle.
+        Diccionario con datos normalizados o un error.
     """
     try:
         cookie_mgr = CookieManager(get_fresh_cookies, use_proxy=False)

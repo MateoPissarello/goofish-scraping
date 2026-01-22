@@ -1,3 +1,5 @@
+"""Worker ECS: consume URLs desde SQS, scrapea y persiste en DynamoDB."""
+
 import os
 import json
 import time
@@ -10,7 +12,7 @@ from hashlib import md5
 from worker.scraping.PdpScraper import PdpScrapper
 
 # -------------------------
-# Config
+# Configuración
 # -------------------------
 REGION_NAME = os.getenv("AWS_REGION", "us-east-1")
 SQS_QUEUE_URL = os.getenv("SQS_QUEUE_URL")
@@ -36,6 +38,7 @@ shutdown_event = asyncio.Event()
 
 
 def handle_shutdown():
+    """Marca el evento de apagado para salir del loop principal limpiamente."""
     logging.info("SIGTERM/SIGINT recibido. Iniciando shutdown limpio...")
     shutdown_event.set()
 
@@ -44,15 +47,18 @@ def handle_shutdown():
 # Helpers
 # -------------------------
 def url_hash(url: str) -> str:
+    """Genera un hash estable para usar como PK en DynamoDB."""
     return md5(url.encode("utf-8")).hexdigest()
 
 
 def get_job_status(url_hash_value: str):
+    """Obtiene el estado de una URL previamente procesada."""
     resp = scraped_table.get_item(Key={"url_hash": url_hash_value})
     return resp.get("Item")
 
 
 def mark_job(url: str, status: str, error: str | None = None):
+    """Crea o actualiza el estado de scraping de una URL."""
     item = {
         "url_hash": url_hash(url),
         "url": url,
@@ -65,6 +71,7 @@ def mark_job(url: str, status: str, error: str | None = None):
 
 
 def save_data(item: dict):
+    """Guarda el ítem parseado en la tabla de resultados."""
     parsed_table.put_item(Item=item)
 
 
@@ -72,6 +79,7 @@ def save_data(item: dict):
 # Message handler
 # -------------------------
 async def handle_message(msg, scraper, semaphore):
+    """Procesa un mensaje SQS con control de concurrencia."""
     async with semaphore:
         receipt = msg["ReceiptHandle"]
         body = json.loads(msg["Body"])
@@ -118,6 +126,7 @@ async def handle_message(msg, scraper, semaphore):
 # Main loop
 # -------------------------
 async def main():
+    """Loop principal: long polling en SQS y procesamiento concurrente."""
     idle_time = 0
     loop = asyncio.get_running_loop()
 

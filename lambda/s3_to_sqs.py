@@ -1,3 +1,5 @@
+"""Lambda que envía URLs desde un CSV en S3 hacia SQS."""
+
 import json
 import csv
 import boto3
@@ -11,6 +13,12 @@ QUEUE_URL = os.environ["SQS_QUEUE_URL"]
 
 
 def handler(event, context):
+    """Handler de Lambda para eventos S3 ObjectCreated.
+
+    Args:
+        event: Evento de S3 con registros de objetos creados.
+        context: Contexto Lambda (no usado).
+    """
     for record in event["Records"]:
         bucket = record["s3"]["bucket"]["name"]
         key = urllib.parse.unquote_plus(record["s3"]["object"]["key"])
