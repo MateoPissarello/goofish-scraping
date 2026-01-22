@@ -1,2 +1,8 @@
 .venv
 .env
+.terraform
+terraform.tfvars
+terraform.tfstate
+terraform.tfstate.backup
+*.log
+__pycache__/

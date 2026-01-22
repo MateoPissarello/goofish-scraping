@@ -42,9 +42,34 @@ resource "aws_security_group" "ecs_tasks" {
 }
 
 # -------------------------
+# Secrets Manager
+# -------------------------
+
+resource "aws_secretsmanager_secret" "proxy" {
+  name = "${var.project_name}/proxy"
+
+  description = "Credenciales de proxy para scraping Goofish"
+
+  tags = {
+    Project = var.project_name
+  }
+}
+
+resource "aws_secretsmanager_secret_version" "proxy" {
+  secret_id = aws_secretsmanager_secret.proxy.id
+
+  secret_string = jsonencode({
+    PROXY_SERVER = var.proxy_server
+    PROXY_USER   = var.proxy_user
+    PROXY_PASS   = var.proxy_pass
+  })
+}
+
+
+# -------------------------
 # DynamoDB (idempotency)
 # -------------------------
-resource "aws_dynamodb_table" "scraped_urls" {
+resource "aws_dynamodb_table" "scraped_urls" { # Table for caching scraped URLs
   name         = "${var.project_name}-scraped-urls"
   billing_mode = "PAY_PER_REQUEST"
   hash_key     = "url_hash"
@@ -58,6 +83,23 @@ resource "aws_dynamodb_table" "scraped_urls" {
     Project = var.project_name
   }
 }
+
+resource "aws_dynamodb_table" "parsed_urls" { # Table for storing parsed items
+  name         = "${var.project_name}-parsed-items"
+  billing_mode = "PAY_PER_REQUEST"
+  hash_key     = "ITEM_ID"
+
+  attribute {
+    name = "ITEM_ID"
+    type = "S"
+  }
+
+  tags = {
+    Project = var.project_name
+  }
+}
+
+
 
 # -------------------------
 # SQS + DLQ
@@ -107,7 +149,7 @@ resource "aws_iam_role" "ecs_execution_role" {
 
 resource "aws_iam_role_policy_attachment" "ecs_exec_attach" {
   role       = aws_iam_role.ecs_execution_role.name
-  policy_arn  = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
 }
 
 # Task role (SQS + DynamoDB)
@@ -135,9 +177,35 @@ data "aws_iam_policy_document" "task_policy" {
       "dynamodb:PutItem",
       "dynamodb:UpdateItem"
     ]
-    resources = [aws_dynamodb_table.scraped_urls.arn]
+    resources = [
+      aws_dynamodb_table.scraped_urls.arn,
+      aws_dynamodb_table.parsed_urls.arn
+    ]
+  }
+
+}
+
+data "aws_iam_policy_document" "ecs_exec_secrets_policy" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "secretsmanager:GetSecretValue"
+    ]
+    resources = [
+      aws_secretsmanager_secret.proxy.arn
+    ]
   }
 }
+
+resource "aws_iam_policy" "ecs_exec_secrets_policy" {
+  name   = "${var.project_name}-ecs-exec-secrets"
+  policy = data.aws_iam_policy_document.ecs_exec_secrets_policy.json
+}
+resource "aws_iam_role_policy_attachment" "ecs_exec_secrets_attach" {
+  role       = aws_iam_role.ecs_execution_role.name
+  policy_arn = aws_iam_policy.ecs_exec_secrets_policy.arn
+}
+
 
 resource "aws_iam_policy" "ecs_task_policy" {
   name   = "${var.project_name}-ecs-task-policy"
@@ -145,9 +213,112 @@ resource "aws_iam_policy" "ecs_task_policy" {
 }
 
 resource "aws_iam_role_policy_attachment" "task_policy_attach" {
-  role      = aws_iam_role.ecs_task_role.name
+  role       = aws_iam_role.ecs_task_role.name
   policy_arn = aws_iam_policy.ecs_task_policy.arn
 }
+
+# ===============================================
+# S3
+# ==============================================
+resource "aws_s3_bucket" "datasets" {
+  bucket = "${var.project_name}-datasets"
+}
+
+resource "aws_s3_bucket_notification" "datasets_notify" {
+  bucket = aws_s3_bucket.datasets.id
+
+  lambda_function {
+    lambda_function_arn = aws_lambda_function.s3_to_sqs.arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_suffix       = ".csv"
+  }
+
+  depends_on = [aws_lambda_permission.allow_s3]
+}
+
+
+data "aws_iam_policy_document" "lambda_assume" {
+  statement {
+    effect = "Allow"
+    principals {
+      type        = "Service"
+      identifiers = ["lambda.amazonaws.com"]
+    }
+    actions = ["sts:AssumeRole"]
+  }
+}
+
+resource "aws_iam_role" "lambda_role" {
+  name               = "${var.project_name}-s3-to-sqs-role"
+  assume_role_policy = data.aws_iam_policy_document.lambda_assume.json
+}
+
+data "aws_iam_policy_document" "lambda_policy" {
+  statement {
+    effect = "Allow"
+    actions = [
+      "s3:GetObject"
+    ]
+    resources = ["${aws_s3_bucket.datasets.arn}/*"]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "sqs:SendMessage"
+    ]
+    resources = [aws_sqs_queue.main.arn]
+  }
+
+  statement {
+    effect = "Allow"
+    actions = [
+      "logs:CreateLogGroup",
+      "logs:CreateLogStream",
+      "logs:PutLogEvents"
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_policy" "lambda_policy" {
+  name   = "${var.project_name}-s3-to-sqs-policy"
+  policy = data.aws_iam_policy_document.lambda_policy.json
+}
+
+resource "aws_iam_role_policy_attachment" "lambda_policy_attach" {
+  role       = aws_iam_role.lambda_role.name
+  policy_arn = aws_iam_policy.lambda_policy.arn
+}
+
+
+resource "aws_lambda_function" "s3_to_sqs" {
+  function_name = "${var.project_name}-s3-to-sqs"
+  role          = aws_iam_role.lambda_role.arn
+  handler       = "s3_to_sqs.handler"
+  runtime       = "python3.11"
+  timeout       = 60
+
+  filename         = "${path.module}/../lambda/s3_to_sqs.zip"
+  source_code_hash = filebase64sha256("${path.module}/../lambda/s3_to_sqs.zip")
+
+  environment {
+    variables = {
+      SQS_QUEUE_URL = aws_sqs_queue.main.url
+    }
+  }
+}
+
+resource "aws_lambda_permission" "allow_s3" {
+  statement_id  = "AllowExecutionFromS3"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.s3_to_sqs.function_name
+  principal     = "s3.amazonaws.com"
+  source_arn    = aws_s3_bucket.datasets.arn
+}
+
+
+
 
 # -------------------------
 # ECS Cluster + Task + Service (Fargate)
@@ -174,10 +345,25 @@ resource "aws_ecs_task_definition" "worker" {
 
       environment = [
         { name = "SQS_QUEUE_URL", value = aws_sqs_queue.main.url },
-        { name = "DDB_TABLE_NAME", value = aws_dynamodb_table.scraped_urls.name },
+        { name = "GOOFISH_SCRAPED_URLS_TABLE", value = aws_dynamodb_table.scraped_urls.name },
+        { name = "GOOFISH_PARSED_URLS_TABLE", value = aws_dynamodb_table.parsed_urls.name },
         { name = "AWS_REGION", value = var.aws_region }
       ]
 
+      secrets = [
+        {
+          name      = "PROXY_SERVER"
+          valueFrom = "${aws_secretsmanager_secret.proxy.arn}:PROXY_SERVER::"
+        },
+        {
+          name      = "PROXY_USER"
+          valueFrom = "${aws_secretsmanager_secret.proxy.arn}:PROXY_USER::"
+        },
+        {
+          name      = "PROXY_PASS"
+          valueFrom = "${aws_secretsmanager_secret.proxy.arn}:PROXY_PASS::"
+        }
+      ]
       logConfiguration = {
         logDriver = "awslogs"
         options = {
@@ -212,6 +398,7 @@ resource "aws_ecs_service" "worker" {
 # -------------------------
 # Auto Scaling basado en SQS messages visible
 # -------------------------
+
 resource "aws_appautoscaling_target" "ecs" {
   max_capacity       = var.max_capacity
   min_capacity       = var.min_capacity
@@ -220,7 +407,6 @@ resource "aws_appautoscaling_target" "ecs" {
   service_namespace  = "ecs"
 }
 
-# Scale OUT (subir tasks)
 resource "aws_cloudwatch_metric_alarm" "scale_out" {
   alarm_name          = "${var.project_name}-scale-out"
   comparison_operator = "GreaterThanThreshold"
@@ -229,8 +415,7 @@ resource "aws_cloudwatch_metric_alarm" "scale_out" {
   namespace           = "AWS/SQS"
   period              = 60
   statistic           = "Average"
-  threshold           = var.scale_out_threshold
-  alarm_description   = "Scale out ECS when SQS has many messages"
+  threshold           = 10
   treat_missing_data  = "notBreaching"
 
   dimensions = {
@@ -252,14 +437,33 @@ resource "aws_appautoscaling_policy" "scale_out" {
     cooldown                = 60
     metric_aggregation_type = "Average"
 
+    # (métrica - threshold) entra en estos rangos
+
+    # 10-50 msgs => +1
     step_adjustment {
       metric_interval_lower_bound = 0
-      scaling_adjustment          = 2
+      metric_interval_upper_bound = 40
+      scaling_adjustment          = 1
     }
+
+    # 50-200 msgs => +5
+    step_adjustment {
+      metric_interval_lower_bound = 40
+      metric_interval_upper_bound = 190
+      scaling_adjustment          = 5
+    }
+
+    # 200+ msgs => +10
+    step_adjustment {
+      metric_interval_lower_bound = 190
+      scaling_adjustment          = 10
+    }
+
+
   }
 }
 
-# Scale IN (bajar tasks)
+
 resource "aws_cloudwatch_metric_alarm" "scale_in" {
   alarm_name          = "${var.project_name}-scale-in"
   comparison_operator = "LessThanThreshold"
@@ -268,8 +472,7 @@ resource "aws_cloudwatch_metric_alarm" "scale_in" {
   namespace           = "AWS/SQS"
   period              = 60
   statistic           = "Average"
-  threshold           = var.scale_in_threshold
-  alarm_description   = "Scale in ECS when SQS is mostly empty"
+  threshold           = 5
   treat_missing_data  = "breaching"
 
   dimensions = {
@@ -297,3 +500,6 @@ resource "aws_appautoscaling_policy" "scale_in" {
     }
   }
 }
+
+
+

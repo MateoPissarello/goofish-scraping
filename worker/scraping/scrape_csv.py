@@ -1,115 +1,115 @@
-import argparse
-import asyncio
-import csv
-import json
-import sys
-from pathlib import Path
+# import argparse
+# import asyncio
+# import csv
+# import json
+# import sys
+# from pathlib import Path
 
-if __package__ is None or __package__ == "":
-    sys.path.append(str(Path(__file__).resolve().parents[1]))
+# if __package__ is None or __package__ == "":
+#     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from worker.utils.CookieManager import CookieManager
-from worker.scraping.scraping_repository import get_fresh_cookies, parse_product, scrape_pdp
+# from worker.utils.CookieManager import CookieManager
+# from worker.scraping.scraping_repository import parse_product, scrape_pdp
 
-TOKEN_ERRORS = ("FAIL_SYS_TOKEN", "TOKEN_EMPTY", "RGV587_ERROR")
-OUTPUT_FIELDS = [
-    "ITEM_ID",
-    "CATEGORY_ID",
-    "TITLE",
-    "IMAGES",
-    "SOLD_PRICE",
-    "BROWSE_COUNT",
-    "WANT_COUNT",
-    "COLLECT_COUNT",
-    "QUANTITY",
-    "GMT_CREATE",
-    "SELLER_ID",
-    "URL",
-    "ERROR",
-]
-
-
-async def scrape_one(
-    url: str,
-    cookie_mgr: CookieManager,
-    retries: int,
-    timeout_s: float,
-) -> dict:
-    """Scrapea una URL con reintentos y manejo de tokens.
-
-    Args:
-        url: URL del producto.
-        cookie_mgr: Gestor de cookies para la sesion.
-        retries: Reintentos cuando falla el token.
-        timeout_s: Timeout maximo por request.
-
-    Returns:
-        Diccionario con datos del producto o un error.
-    """
-    last_ret = ""
-    for _ in range(retries + 1):
-        cookies = await cookie_mgr.ensure(url)
-        try:
-            result = await asyncio.wait_for(
-                scrape_pdp(
-                    url,
-                    save_to_file=False,
-                    cookies=cookies,
-                    use_proxy=cookie_mgr.use_proxy,
-                ),
-                timeout=timeout_s,
-            )
-        except asyncio.TimeoutError:
-            return {"URL": url, "ERROR": "REQUEST_TIMEOUT"}
-        ret = result.get("ret", [""])[0]
-        last_ret = ret
-
-        if ret and "SUCCESS" not in ret:
-            if any(err in ret for err in TOKEN_ERRORS):
-                await cookie_mgr.refresh(url)
-                continue
-            return {"URL": url, "ERROR": ret}
-
-        parsed = await parse_product(result)
-        parsed["URL"] = url
-        if isinstance(parsed.get("IMAGES"), list):
-            parsed["IMAGES"] = json.dumps(parsed["IMAGES"], ensure_ascii=False)
-        return parsed
-
-    return {"URL": url, "ERROR": last_ret or "UNKNOWN_ERROR"}
+# TOKEN_ERRORS = ("FAIL_SYS_TOKEN", "TOKEN_EMPTY", "RGV587_ERROR")
+# OUTPUT_FIELDS = [
+#     "ITEM_ID",
+#     "CATEGORY_ID",
+#     "TITLE",
+#     "IMAGES",
+#     "SOLD_PRICE",
+#     "BROWSE_COUNT",
+#     "WANT_COUNT",
+#     "COLLECT_COUNT",
+#     "QUANTITY",
+#     "GMT_CREATE",
+#     "SELLER_ID",
+#     "URL",
+#     "ERROR",
+# ]
 
 
-def load_urls(csv_path: Path) -> list[str]:
-    """Lee URLs desde un CSV con columna URL.
+# async def scrape_one(
+#     url: str,
+#     cookie_mgr: CookieManager,
+#     retries: int,
+#     timeout_s: float,
+# ) -> dict:
+#     """Scrapea una URL con reintentos y manejo de tokens.
 
-    Args:
-        csv_path: Ruta al CSV de entrada.
+#     Args:
+#         url: URL del producto.
+#         cookie_mgr: Gestor de cookies para la sesion.
+#         retries: Reintentos cuando falla el token.
+#         timeout_s: Timeout maximo por request.
 
-    Returns:
-        Lista de URLs encontradas.
-    """
-    with csv_path.open("r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        urls = []
-        for row in reader:
-            url = (row.get("URL") or "").strip()
-            if url:
-                urls.append(url)
-    return urls
+#     Returns:
+#         Diccionario con datos del producto o un error.
+#     """
+#     last_ret = ""
+#     for _ in range(retries + 1):
+#         cookies = await cookie_mgr.ensure(url)
+#         try:
+#             result = await asyncio.wait_for(
+#                 scrape_pdp(
+#                     url,
+#                     save_to_file=False,
+#                     cookies=cookies,
+#                     use_proxy=cookie_mgr.use_proxy,
+#                 ),
+#                 timeout=timeout_s,
+#             )
+#         except asyncio.TimeoutError:
+#             return {"URL": url, "ERROR": "REQUEST_TIMEOUT"}
+#         ret = result.get("ret", [""])[0]
+#         last_ret = ret
+
+#         if ret and "SUCCESS" not in ret:
+#             if any(err in ret for err in TOKEN_ERRORS):
+#                 await cookie_mgr.refresh(url)
+#                 continue
+#             return {"URL": url, "ERROR": ret}
+
+#         parsed = await parse_product(result)
+#         parsed["URL"] = url
+#         if isinstance(parsed.get("IMAGES"), list):
+#             parsed["IMAGES"] = json.dumps(parsed["IMAGES"], ensure_ascii=False)
+#         return parsed
+
+#     return {"URL": url, "ERROR": last_ret or "UNKNOWN_ERROR"}
 
 
-def build_row(data: dict) -> dict:
-    """Construye una fila completa con todas las columnas esperadas.
+# def load_urls(csv_path: Path) -> list[str]:
+#     """Lee URLs desde un CSV con columna URL.
 
-    Args:
-        data: Datos parciales del producto.
+#     Args:
+#         csv_path: Ruta al CSV de entrada.
 
-    Returns:
-        Diccionario con todas las columnas definidas en OUTPUT_FIELDS.
-    """
-    row = {key: "" for key in OUTPUT_FIELDS}
-    row.update({key: value for key, value in data.items() if key in row})
-    return row
+#     Returns:
+#         Lista de URLs encontradas.
+#     """
+#     with csv_path.open("r", encoding="utf-8") as f:
+#         reader = csv.DictReader(f)
+#         urls = []
+#         for row in reader:
+#             url = (row.get("URL") or "").strip()
+#             if url:
+#                 urls.append(url)
+#     return urls
+
+
+# def build_row(data: dict) -> dict:
+#     """Construye una fila completa con todas las columnas esperadas.
+
+#     Args:
+#         data: Datos parciales del producto.
+
+#     Returns:
+#         Diccionario con todas las columnas definidas en OUTPUT_FIELDS.
+#     """
+#     row = {key: "" for key in OUTPUT_FIELDS}
+#     row.update({key: value for key, value in data.items() if key in row})
+#     return row
 
 
 # async def run(
@@ -194,23 +194,23 @@ def build_row(data: dict) -> dict:
 #     print(f"CSV generado en: {output_path}")
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Scraper paralelo para URLs de Goofish en CSV.")
-    parser.add_argument("--input", default="../data/goofish_urls.csv", help="CSV de entrada con columna URL")
-    parser.add_argument("--output", default="../data/goofish_products.csv", help="CSV de salida con datos completos")
-    parser.add_argument("--workers", type=int, default=5, help="Cantidad de workers en paralelo")
-    parser.add_argument("--retries", type=int, default=1, help="Reintentos por URL si falla el token")
-    parser.add_argument("--timeout", type=float, default=45.0, help="Timeout maximo por request en segundos")
-    parser.add_argument("--use-proxy", action="store_true", help="Usar proxy al refrescar cookies")
-    args = parser.parse_args()
+# if __name__ == "__main__":
+#     parser = argparse.ArgumentParser(description="Scraper paralelo para URLs de Goofish en CSV.")
+#     parser.add_argument("--input", default="../data/goofish_urls.csv", help="CSV de entrada con columna URL")
+#     parser.add_argument("--output", default="../data/goofish_products.csv", help="CSV de salida con datos completos")
+#     parser.add_argument("--workers", type=int, default=5, help="Cantidad de workers en paralelo")
+#     parser.add_argument("--retries", type=int, default=1, help="Reintentos por URL si falla el token")
+#     parser.add_argument("--timeout", type=float, default=45.0, help="Timeout maximo por request en segundos")
+#     parser.add_argument("--use-proxy", action="store_true", help="Usar proxy al refrescar cookies")
+#     args = parser.parse_args()
 
-    asyncio.run(
-        run(
-            input_path=Path(args.input),
-            output_path=Path(args.output),
-            workers=args.workers,
-            retries=args.retries,
-            use_proxy=args.use_proxy,
-            timeout_s=args.timeout,
-        )
-    )
+#     asyncio.run(
+#         run(
+#             input_path=Path(args.input),
+#             output_path=Path(args.output),
+#             workers=args.workers,
+#             retries=args.retries,
+#             use_proxy=args.use_proxy,
+#             timeout_s=args.timeout,
+#         )
+#     )

@@ -25,3 +25,6 @@ output "ecs_service_name" {
 output "log_group_name" {
   value = aws_cloudwatch_log_group.worker.name
 }
+output "datasets_bucket_name" {
+  value = aws_s3_bucket.datasets.bucket
+}

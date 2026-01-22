@@ -43,8 +43,9 @@ variable "scale_in_threshold" {
 # Tiempo máximo esperado por URL (para visibilidad SQS). Ajusta según tu scraping real.
 variable "sqs_visibility_timeout_seconds" {
   type    = number
-  default = 120
+  default = 300
 }
+
 
 variable "worker_cpu" {
   type    = number
@@ -54,4 +55,28 @@ variable "worker_cpu" {
 variable "worker_memory" {
   type    = number
   default = 1024
+}
+
+variable "messages_per_task" {
+  type        = number
+  default     = 5
+  description = "Número objetivo de mensajes visibles por task ECS"
+}
+
+variable "proxy_server" {
+  type        = string
+  description = "Servidor de proxy (host:port)"
+  sensitive   = true
+}
+
+variable "proxy_user" {
+  type        = string
+  description = "Usuario del proxy"
+  sensitive   = true
+}
+
+variable "proxy_pass" {
+  type        = string
+  description = "Password del proxy"
+  sensitive   = true
 }

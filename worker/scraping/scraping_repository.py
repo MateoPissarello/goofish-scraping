@@ -2,7 +2,7 @@ import json
 import logging
 import time
 from hashlib import md5
-from os import getenv
+import os
 from dotenv import load_dotenv
 from urllib.parse import parse_qs, urlparse
 import asyncio
@@ -22,10 +22,11 @@ TEST_URL = "https://www.goofish.com/item?id=894551126004"
 
 MAX_TOKEN_RETRIES = 2
 
+
 logger = logging.getLogger(__name__)
 
 
-def _build_proxy_settings(use_proxy: bool, proxy_server: str | None = None, proxy_user: str | None = None, proxy_pass: str | None = None) -> tuple[dict | None, str | None]:
+def _build_proxy_settings(use_proxy: bool) -> tuple[dict | None, str | None]:
     """Construye configuracion de proxy para Playwright y httpx.
 
     Args:
@@ -41,6 +42,10 @@ def _build_proxy_settings(use_proxy: bool, proxy_server: str | None = None, prox
     """
     if not use_proxy:
         return None, None
+    proxy_server = os.getenv("PROXY_SERVER")
+    proxy_user = os.getenv("PROXY_USER")
+    proxy_pass = os.getenv("PROXY_PASS")
+
     if not proxy_server or not proxy_user or not proxy_pass:
         raise ValueError("Falta configurar PROXY_SERVER/PROXY_USER/PROXY_PASS")
     proxy_settings = {
