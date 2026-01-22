@@ -297,7 +297,8 @@ resource "aws_lambda_function" "s3_to_sqs" {
   role          = aws_iam_role.lambda_role.arn
   handler       = "s3_to_sqs.handler"
   runtime       = "python3.11"
-  timeout       = 60
+  timeout       = 600
+  memory_size   = 1536
 
   filename         = "${path.module}/../lambda/s3_to_sqs.zip"
   source_code_hash = filebase64sha256("${path.module}/../lambda/s3_to_sqs.zip")

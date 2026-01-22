@@ -16,20 +16,41 @@ def handler(event, context):
         key = urllib.parse.unquote_plus(record["s3"]["object"]["key"])
 
         obj = s3.get_object(Bucket=bucket, Key=key)
-        lines = obj["Body"].read().decode("utf-8").splitlines()
 
-        reader = csv.DictReader(lines)
-        count = 0
+        # Streaming del body
+        lines = obj["Body"].iter_lines()
+        reader = csv.DictReader(
+            (line.decode("utf-8") for line in lines)
+        )
+
+        batch = []
+        total = 0
 
         for row in reader:
             url = (row.get("URL") or "").strip()
             if not url:
                 continue
 
-            sqs.send_message(
-                QueueUrl=QUEUE_URL,
-                MessageBody=json.dumps({"url": url}),
-            )
-            count += 1
+            batch.append({
+                "Id": str(len(batch)),
+                "MessageBody": json.dumps({"url": url}),
+            })
 
-        print(f"Sent {count} URLs to SQS from {key}")
+            # Enviar batch de 10
+            if len(batch) == 10:
+                sqs.send_message_batch(
+                    QueueUrl=QUEUE_URL,
+                    Entries=batch,
+                )
+                total += len(batch)
+                batch = []
+
+        # Enviar resto
+        if batch:
+            sqs.send_message_batch(
+                QueueUrl=QUEUE_URL,
+                Entries=batch,
+            )
+            total += len(batch)
+
+        print(f"Sent {total} URLs to SQS from {key}")
