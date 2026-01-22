@@ -1,96 +1,122 @@
-# Goofish Scraper
+# Goofish Scraper (Iceberg Data)
 
-Scraper asincronico para extraer datos de productos de Goofish a partir de URLs y exponer un endpoint HTTP.
+Pipeline de scraping asincrónica para extraer datos de productos de Goofish a partir de URLs y procesarlos en AWS con S3 → Lambda → SQS → ECS Fargate. Incluye un endpoint HTTP opcional para pruebas locales.
 
-## Nota
+## Arquitectura
 
-La cantidad de productos que se pueden scrapear por ahora depende mucho de los recursos de la PC. Por eso se corrio el script en una maquina EC2 c6a.2xlarge (8 vCPU, 16 GiB RAM, red Up to 12.5 Gigabit) con 15 workers.
+1) **Carga de URLs**: se sube un CSV a S3 (columna `URL`).
+2) **Lambda (S3→SQS)**: al detectar el CSV, envía las URLs a SQS en batches de 10.
+3) **Workers (ECS Fargate)**: consumen mensajes de SQS, scrapean el PDP y guardan resultados en DynamoDB.
+4) **DynamoDB**:
+   - `*-scraped-urls`: idempotencia y status por URL.
+   - `*-parsed-items`: items parseados.
+5) **Autoscaling**: escala por cantidad de mensajes visibles en SQS.
 
-Resultados:
-- **Total Productos Scrapeados**: 27.783
-   - **Total sin error**: 24084
-   - **Total con error**: 3699
+## Componentes
+
+- `worker/worker.py`: loop principal del worker (SQS → scrape → DynamoDB).
+- `worker/scraping/scraping_repository.py`: lógica de cookies, firma y request a endpoint interno.
+- `worker/scraping/PdpScraper.py`: wrapper de scraping por URL.
+- `lambda/s3_to_sqs.py`: Lambda que lee CSV desde S3 y publica en SQS.
+- `infra/`: Terraform para S3, SQS, DynamoDB, ECS, IAM, CloudWatch y Secrets Manager.
+- `main.py`: API FastAPI para probar scraping por URL.
+
 ## Requisitos
 
 - Python 3.11+
-- Dependencias en `requirements.txt`
-- Playwright instalado y navegadores descargados (si vas a obtener cookies con navegador)
+- Playwright + Chromium
+- AWS account con permisos para crear los recursos
+- Terraform >= 1.5
+- Docker (para construir la imagen del worker)
 
-## Configuracion
+## Configuración
 
-Variables de entorno opcionales para proxy (solo si `--use-proxy`):
+### Variables de entorno (worker)
 
-- `PROXY_SERVER`
-- `PROXY_USER`
-- `PROXY_PASS`
+- `AWS_REGION`
+- `SQS_QUEUE_URL`
+- `GOOFISH_SCRAPED_URLS_TABLE`
+- `GOOFISH_PARSED_URLS_TABLE`
+- `PROXY_SERVER`, `PROXY_USER`, `PROXY_PASS` (requeridas si `use_proxy=True`)
 
-Crea un archivo `.env` en la raiz si queres cargar estas variables automaticamente.
+> Nota: en `PdpScraper`, el `CookieManager` usa proxy por defecto (`use_proxy=True`). Si corrés el worker localmente, definí estas variables o ajustá el código.
 
-## Uso rapido
+### Variables de entorno (API local)
+
+Para la API de `main.py` no se usa proxy por defecto (`use_proxy=False`).
+
+Opcionalmente podés definir un `.env` con credenciales de proxy si querés probar con proxy.
+
+## Uso local
 
 Instalar dependencias:
 
 ```bash
 pip install -r requirements.txt
+playwright install --with-deps chromium
 ```
 
-Scraping a CSV desde un listado de URLs:
-
-```bash
-python utils/scrape_csv.py \
-  --input data/goofish_urls.csv \
-  --output data/goofish_products.csv \
-  --workers 5 \
-  --retries 1 \
-  --timeout 45
-```
-
-Ejecutar API:
+Levantar API local:
 
 ```bash
 python main.py
 ```
 
-Luego abrir `http://localhost:8080/docs`.
+Abrir en el navegador:
 
-## Estrategia de scraping (50.000 productos)
+```
+http://localhost:8080/docs
+```
 
-La obtencion de productos se basa en un flujo híbrido: navegador para cookies + API interna para datos.
+Endpoint principal:
 
-1) **Cookies con Playwright**
-   - Se abre un navegador Chromium en modo stealth y se visita una URL valida.
-   - Se recolectan cookies criticas (`_m_h5_tk`, `cookie2`) usadas por el endpoint interno.
-   - Estas cookies se cachean con `CookieManager` y se refrescan automaticamente ante errores de token.
+```
+GET /scrapePDP?url=https://www.goofish.com/item?id=XXXX
+```
 
-2) **Llamada directa al endpoint interno (mtop)**
-   - Para cada URL se extrae `itemId` y se arma el payload esperado por el endpoint.
-   - Se genera la firma `sign` con MD5 usando el token de cookies, timestamp y payload.
-   - Se hace un POST a `h5api.m.goofish.com` para obtener el JSON de detalle.
+## Deploy en AWS (Terraform)
 
-3) **Concurrencia controlada y escalado**
-   - Se encola cada URL y se reparte entre `workers` para balancear carga.
-   - Cada worker usa su propio `CookieManager` con lock interno para evitar colisiones.
-   - Se mantiene un cache compartido de URLs visitadas para evitar requests duplicados.
-   - Se limitan reintentos a errores de token y se registra cada resultado en CSV.
+Desde `infra/`:
 
-4) **Rendimiento y estabilidad**
-   - Se reutilizan cookies entre muchas URLs hasta que el token expira.
-   - Se usan timeouts a nivel request para evitar bloqueos prolongados.
-   - El scraping es idempotente y se registra el estado por URL (OK/ERROR).
+```bash
+terraform init
+terraform apply \
+  -var 'ecr_image_url=123456789012.dkr.ecr.us-east-1.amazonaws.com/iceberg-scraper-worker:latest' \
+  -var 'proxy_server=host:port' \
+  -var 'proxy_user=usuario' \
+  -var 'proxy_pass=pass'
+```
 
-## Estructura del proyecto
+Outputs relevantes:
 
-- `utils/scraping_repository.py`: obtencion de cookies, firma y scraping del endpoint.
-- `utils/CookieManager.py`: cache y refresh de cookies.
-- `utils/scrape_csv.py`: orquestacion del scraping masivo a CSV.
-- `utils/count_scraped.py`: reporte de productos scrapeados.
-- `main.py`: API FastAPI con endpoint de scraping.
-- `data/`: CSVs de entrada/salida de ejemplo.
--
+- `datasets_bucket_name` (subir CSVs aquí)
+- `sqs_queue_url`
+- `ecs_service_name`
+- `log_group_name`
+
+## Build & push del worker
+
+```bash
+docker build -t iceberg-scraper-worker .
+# tag y push a ECR según tu cuenta
+```
+
+## Ingesta de URLs
+
+1) Subí un CSV a S3 con columna `URL`.
+2) La Lambda enviará las URLs a SQS.
+3) Los workers procesan y guardan resultados en DynamoDB.
+
+Ejemplo de CSV:
+
+```csv
+URL
+https://www.goofish.com/item?id=894551126004
+```
 
 ## Notas
 
-- Para scraping masivo, ajustar `--workers` y `--timeout` segun los recursos.
-- La cantidad de productos que se pueden scrapear por ahora depende mucho de los recursos de la PC.
-- Por eso se corrio el script en una maquina EC2 c6a.2xlarge (8 vCPU, 16 GiB RAM, red Up to 12.5 Gigabit) con 15 workers.
+- La idempotencia se maneja en DynamoDB usando `url_hash`.
 - Si el endpoint devuelve errores de token, se refrescan cookies y se reintenta.
+- El timeout de SQS se controla con `sqs_visibility_timeout_seconds` en Terraform.
+- El autoscaling se basa en la métrica `ApproximateNumberOfMessagesVisible` de SQS.
