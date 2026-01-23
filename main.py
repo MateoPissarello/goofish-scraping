@@ -7,7 +7,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.openapi.utils import get_openapi
 from fastapi import FastAPI, Query
 from worker.utils.CookieManager import CookieManager
-from worker.scraping.scrape_csv import scrape_one, get_fresh_cookies
+from worker.scraping.scraping_repository import scrape_one, get_fresh_cookies
 
 
 # =================================================================

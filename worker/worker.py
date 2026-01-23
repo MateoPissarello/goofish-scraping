@@ -150,6 +150,10 @@ async def handle_message(msg, scraper, semaphore):
 
             duration = time.monotonic() - start
             logging.info("Scrape URL %s tomó %.2f segundos", product_url, duration)
+
+            if "ERROR" in data:
+                raise Exception(data["ERROR"])
+
             save_data(data)
             mark_job(product_url, "SUCCESS")
 
