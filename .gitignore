@@ -6,3 +6,4 @@ terraform.tfstate
 terraform.tfstate.backup
 *.log
 __pycache__/
+data/goofish_products_scraped.csv
