@@ -21,7 +21,6 @@ APP_KEY = "34839810"
 TOKEN_ERRORS = ("FAIL_SYS_TOKEN", "TOKEN_EMPTY", "RGV587_ERROR")
 TEST_URL = "https://www.goofish.com/item?id=894551126004"
 
-
 MAX_TOKEN_RETRIES = 2
 
 
@@ -98,6 +97,103 @@ async def get_fresh_cookies(target_url: str, use_proxy: bool = False) -> dict:
     logger.info("  - cookie2: %s", "ok" if "cookie2" in cookies_dict else "missing")
 
     return cookies_dict
+
+
+async def get_fresh_cookies_V2(target_url: str, use_proxy: bool = False, cookies: dict = None) -> list[dict[str, str]]:
+    """Abre un navegador stealth y devuelve cookies útiles para Goofish.
+
+    Args:
+        cookie_gen_url (str): URL que se visita para generar cookies.
+        use_proxy (bool): Indica si se usa proxy en el navegador.
+
+    Returns:
+        dict: Cookies obtenidas desde el navegador.
+    """
+    logger.info("Obteniendo cookies frescas con Playwright...")
+    proxy_settings, _ = _build_proxy_settings(use_proxy)
+    if cookies is None:
+        logger.warning("No se proporcionaron cookies,")
+        return RuntimeError("No se proporcionaron cookies")
+
+    item_id = extract_item_id(target_url)
+    payload = {"itemId": item_id}
+    data_str = json.dumps(payload, separators=(",", ":"))
+
+    token = cookies.get("_m_h5_tk", "")
+    timestamp = str(int(time.time() * 1000))
+    sign = generate_sign(token, timestamp, data_str)
+
+    params = {
+        "jsv": "2.7.2",
+        "appKey": APP_KEY,
+        "t": timestamp,
+        "sign": sign,
+        "v": "1.0",
+        "type": "originaljson",
+        "accountSite": "xianyu",
+        "dataType": "json",
+        "timeout": "20000",
+        "api": "mtop.taobao.idle.pc.detail",
+        "sessionOption": "AutoLoginOnly",
+        "spm_cnt": "a21ybx.item.0.0",
+    }
+
+    headers = {
+        "accept": "application/json",
+        "accept-language": "es-ES,es;q=0.9",
+        "cache-control": "no-cache",
+        "content-type": "application/x-www-form-urlencoded",
+        "origin": "https://www.goofish.com",
+        "pragma": "no-cache",
+        "priority": "u=1, i",
+        "referer": "https://www.goofish.com/",
+        "sec-ch-ua": '"Google Chrome";v="143", "Chromium";v="143", "Not A(Brand";v="24"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Windows"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-site",
+        "user-agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/143.0.0.0 Safari/537.36"
+        ),
+    }
+
+    _, proxy_url = _build_proxy_settings(use_proxy)
+    transport = httpx.AsyncHTTPTransport(proxy=proxy_url) if proxy_url else None
+    timeout = httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=30.0)
+
+    async with httpx.AsyncClient(
+        cookies=cookies,
+        timeout=timeout,
+        transport=transport,
+    ) as client:
+        try:
+            response = await client.post(
+                API_URL,
+                params=params,
+                headers=headers,
+                content=f"data={data_str}",
+            )
+        except httpx.ConnectTimeout as exc:
+            logger.error("Connect timeout al solicitar %s: %s", target_url, exc)
+            return {"ret": ["CONNECT_TIMEOUT"], "data": {}, "URL": target_url}
+        except httpx.ReadTimeout as exc:
+            logger.error("Read timeout al solicitar %s: %s", target_url, exc)
+            return {"ret": ["READ_TIMEOUT"], "data": {}, "URL": target_url}
+        except httpx.RequestError as exc:
+            logger.error("Error de red al solicitar %s: %s", target_url, exc)
+            return {"ret": [f"REQUEST_ERROR::{exc.__class__.__name__}"], "data": {}, "URL": target_url}
+
+    result = response.json()
+    ret_message = result.get("ret", ["No ret"])[0]
+    logger.info("Estado de la respuesta: %s", ret_message)
+
+    response_cookies = [{"name": name, "value": value} for name, value in response.cookies.items()]
+    logger.info("Cookies generadas por la respuesta: %d", len(response_cookies))
+
+    return response_cookies
 
 
 def extract_item_id(url: str) -> str:
@@ -327,3 +423,12 @@ async def scrape_one(
 
     # Si agotamos retries de token → job falla
     raise RuntimeError(last_ret or "TOKEN_RETRY_EXHAUSTED")
+
+
+if __name__ == "__main__":
+
+    async def main():
+        cookies = await get_fresh_cookies_V2(TEST_URL, use_proxy=False, cookies={})
+        print(cookies)
+
+    asyncio.run(main())
